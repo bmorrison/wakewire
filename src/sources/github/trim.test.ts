@@ -45,18 +45,21 @@ describe("trimGithubEvent — push", () => {
 
   it("truncates commit messages at 500 chars and counts changed files", () => {
     const event = trimGithubEvent({ eventName: "push", deliveryId: "d-1", payload });
-    const commits = event?.payload.commits as Array<Record<string, unknown>>;
+    if (!event) throw new Error("Expected a trimmed push event");
+    const commits = event.payload.commits as Array<Record<string, unknown>>;
+    const secondCommit = commits[1];
+    if (!secondCommit) throw new Error("Expected a second commit");
     expect(commits[0]).toEqual({
       sha: "abc123",
       author: "glenn",
       message: "fix: a bug",
       filesChanged: 3,
     });
-    expect((commits[1]?.message as string).length).toBeLessThanOrEqual(
+    expect((secondCommit.message as string).length).toBeLessThanOrEqual(
       500 + "… [truncated]".length,
     );
-    expect(commits[1]?.message as string).toContain("[truncated]");
-    expect(commits[1]?.filesChanged).toBe(1);
+    expect(secondCommit.message as string).toContain("[truncated]");
+    expect(secondCommit.filesChanged).toBe(1);
   });
 
   it("caps commits at 20 and records the truncation", () => {
@@ -69,10 +72,11 @@ describe("trimGithubEvent — push", () => {
       })),
     };
     const event = trimGithubEvent({ eventName: "push", deliveryId: "d-2", payload: many });
-    expect((event?.payload.commits as unknown[]).length).toBe(20);
-    expect(event?.payload.commitCount).toBe(30);
-    expect(event?.payload.commitsTruncatedTo).toBe(20);
-    expect(event?.summary).toBe("30 commits pushed to acme/api:main by glenn");
+    if (!event) throw new Error("Expected a trimmed push event");
+    expect((event.payload.commits as unknown[]).length).toBe(20);
+    expect(event.payload.commitCount).toBe(30);
+    expect(event.payload.commitsTruncatedTo).toBe(20);
+    expect(event.summary).toBe("30 commits pushed to acme/api:main by glenn");
   });
 });
 
@@ -139,14 +143,15 @@ describe("trimGithubEvent — pull_request / issues / fallback", () => {
       deliveryId: "d-6",
       payload: { repository: { full_name: "acme/api" }, commits: [{}, "garbage"] },
     });
-    expect(push?.payload).toMatchObject({
+    if (!push) throw new Error("Expected a trimmed push event");
+    expect(push.payload).toMatchObject({
       repo: "acme/api",
       branch: "",
       pusher: "unknown",
       commitCount: 2,
     });
-    expect((push?.payload.commits as unknown[])[1]).toEqual({});
-    expect((push?.payload.commits as Array<Record<string, unknown>>)[0]).toEqual({
+    expect((push.payload.commits as unknown[])[1]).toEqual({});
+    expect((push.payload.commits as Array<Record<string, unknown>>)[0]).toEqual({
       sha: "",
       author: "unknown",
       message: "",
