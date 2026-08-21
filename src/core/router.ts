@@ -97,6 +97,18 @@ function matchGithub(match: GithubMatch, event: WakeEvent): boolean {
   const kindMatches = events.some((e) => event.kind === e || event.kind.startsWith(`${e}.`));
   if (!kindMatches) return false;
 
+  if (match.pullRequests && match.pullRequests.length > 0) {
+    const num = event.payload.number;
+    if (typeof num !== "number" || !match.pullRequests.includes(num)) return false;
+  }
+
+  if (match.actors && match.actors.length > 0) {
+    const actor = event.payload.actor;
+    if (typeof actor !== "string") return false;
+    const actorLower = actor.toLowerCase();
+    if (!match.actors.some((a) => a.toLowerCase() === actorLower)) return false;
+  }
+
   if (match.branches && match.branches.length > 0 && event.kind === "push") {
     const branch = event.payload.branch;
     if (typeof branch !== "string") return false;

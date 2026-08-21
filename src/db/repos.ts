@@ -2,7 +2,14 @@ import crypto from "node:crypto";
 import type { Database } from "better-sqlite3";
 import type { WakeEvent } from "../core/event.js";
 import { WakeEventSchema } from "../core/event.js";
-import type { Route, RouteInput, RouteTarget, SandboxPolicy } from "../core/route.js";
+import type {
+  Route,
+  RouteInput,
+  RouteInputRaw,
+  RouteTarget,
+  SandboxPolicy,
+} from "../core/route.js";
+import { RouteInputSchema } from "../core/route.js";
 
 export type DeliveryStatus =
   | "received"
@@ -50,6 +57,8 @@ interface RouteRow {
   prompt_template: string | null;
   sandbox_policy: string;
   rate_limit_per_minute: number | null;
+  settle_seconds: number | null;
+  network_access: number;
   enabled: number;
   created_at: string;
 }
@@ -86,13 +95,14 @@ function nowIso(): string {
 export class RouteStore {
   constructor(private readonly db: Database) {}
 
-  create(input: RouteInput): Route {
+  create(rawInput: RouteInputRaw | RouteInput): Route {
+    const input = RouteInputSchema.parse(rawInput);
     const id = crypto.randomUUID();
     const createdAt = nowIso();
     this.db
       .prepare(
-        `INSERT INTO routes (id, name, source_kind, match_json, target_json, prompt_template, sandbox_policy, rate_limit_per_minute, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO routes (id, name, source_kind, match_json, target_json, prompt_template, sandbox_policy, rate_limit_per_minute, settle_seconds, network_access, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -103,6 +113,8 @@ export class RouteStore {
         input.promptTemplate ?? null,
         input.sandbox,
         input.rateLimitPerMinute ?? null,
+        input.settleSeconds ?? null,
+        input.networkAccess ? 1 : 0,
         input.enabled ? 1 : 0,
         createdAt,
       );
@@ -154,7 +166,9 @@ function toRoute(row: RouteRow): Route {
     target: JSON.parse(row.target_json) as RouteTarget,
     promptTemplate: row.prompt_template,
     sandbox: row.sandbox_policy as SandboxPolicy,
-    rateLimitPerMinute: row.rate_limit_per_minute,
+    rateLimitPerMinute: row.rate_limit_per_minute ?? null,
+    settleSeconds: row.settle_seconds ?? null,
+    networkAccess: row.network_access === 1,
     enabled: row.enabled === 1,
     createdAt: row.created_at,
   };
@@ -173,38 +187,74 @@ export class DeliveryStore {
     event: WakeEvent;
     renderedPrompt: string;
     isReplay?: boolean;
+    receivedAt?: string;
+    nextAttemptAt?: string | null;
   }): Delivery | null {
     const id = crypto.randomUUID();
-    const now = nowIso();
-    try {
-      this.db
-        .prepare(
-          `INSERT INTO deliveries (id, route_id, source_delivery_id, received_at, status, attempt_count, next_attempt_at, event_json, rendered_prompt, is_replay, updated_at)
-           VALUES (?, ?, ?, ?, 'queued', 0, NULL, ?, ?, ?, ?)`,
-        )
-        .run(
-          id,
-          args.routeId,
-          args.event.deliveryId,
-          now,
-          JSON.stringify(args.event),
-          args.renderedPrompt,
-          args.isReplay ? 1 : 0,
-          now,
-        );
-    } catch (err) {
-      if (isUniqueViolation(err)) {
+    const now = args.receivedAt ?? nowIso();
+    const isReplay = args.isReplay ? 1 : 0;
+    const nextAttemptAt = args.nextAttemptAt ?? null;
+
+    const run = this.db.transaction(() => {
+      try {
         this.db
           .prepare(
-            `INSERT INTO deliveries (id, route_id, source_delivery_id, received_at, status, attempt_count, event_json, updated_at)
-             VALUES (?, ?, ?, ?, 'skipped-duplicate', 0, ?, ?)`,
+            `INSERT INTO deliveries (id, route_id, source_delivery_id, received_at, status, attempt_count, next_attempt_at, event_json, rendered_prompt, is_replay, updated_at)
+             VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)`,
           )
-          .run(id, args.routeId, args.event.deliveryId, now, JSON.stringify(args.event), now);
-        return null;
+          .run(
+            id,
+            args.routeId,
+            args.event.deliveryId,
+            now,
+            nextAttemptAt,
+            JSON.stringify(args.event),
+            args.renderedPrompt,
+            isReplay,
+            now,
+          );
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          this.db
+            .prepare(
+              `INSERT INTO deliveries (id, route_id, source_delivery_id, received_at, status, attempt_count, event_json, updated_at)
+               VALUES (?, ?, ?, ?, 'skipped-duplicate', 0, ?, ?)`,
+            )
+            .run(id, args.routeId, args.event.deliveryId, now, JSON.stringify(args.event), now);
+          return null;
+        }
+        throw err;
       }
-      throw err;
-    }
-    const created = this.get(id);
+
+      // If this is a live delivery on a route with settling, update the settle cohort
+      if (!args.isReplay && nextAttemptAt) {
+        const cohortRows = this.db
+          .prepare(
+            `SELECT id, next_attempt_at FROM deliveries
+             WHERE route_id = ? AND status IN ('queued', 'held') AND is_replay = 0`,
+          )
+          .all(args.routeId) as Array<{ id: string; next_attempt_at: string | null }>;
+
+        let maxDeadline = nextAttemptAt;
+        for (const row of cohortRows) {
+          if (row.next_attempt_at && row.next_attempt_at > maxDeadline) {
+            maxDeadline = row.next_attempt_at;
+          }
+        }
+
+        const updateStmt = this.db.prepare(
+          `UPDATE deliveries SET next_attempt_at = ?, updated_at = ?
+           WHERE route_id = ? AND status IN ('queued', 'held') AND is_replay = 0`,
+        );
+        updateStmt.run(maxDeadline, now, args.routeId);
+      }
+
+      return id;
+    });
+
+    const resultId = run();
+    if (!resultId) return null;
+    const created = this.get(resultId);
     if (!created) throw new Error("delivery insert failed");
     return created;
   }
@@ -222,7 +272,7 @@ export class DeliveryStore {
       .prepare(
         `SELECT * FROM deliveries
          WHERE status IN ('queued', 'held') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         ORDER BY received_at ASC`,
+         ORDER BY received_at ASC, rowid ASC`,
       )
       .all(nowIsoStr) as DeliveryRow[];
     return rows.map(toDelivery);
@@ -288,6 +338,12 @@ export class DeliveryStore {
     this.db
       .prepare("UPDATE deliveries SET rendered_prompt = ?, updated_at = ? WHERE id = ?")
       .run(renderedPrompt, nowIso(), id);
+  }
+
+  updateAttemptCount(id: string, attemptCount: number): void {
+    this.db
+      .prepare("UPDATE deliveries SET attempt_count = ?, updated_at = ? WHERE id = ?")
+      .run(attemptCount, nowIso(), id);
   }
 
   markCoalesced(ids: string[], intoId: string): void {

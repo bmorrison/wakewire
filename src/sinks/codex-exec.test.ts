@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadId } from "./codex-exec.js";
+import { CodexExecAdapter, parseThreadId } from "./codex-exec.js";
+import { PermanentError } from "./types.js";
 
 describe("parseThreadId", () => {
   it("finds the thread id in a --json event stream", () => {
@@ -15,5 +16,21 @@ describe("parseThreadId", () => {
   it("returns null when absent", () => {
     expect(parseThreadId('{"type":"turn.completed"}')).toBeNull();
     expect(parseThreadId("")).toBeNull();
+  });
+
+  it("rejects networkAccess: true with PermanentError", async () => {
+    const adapter = new CodexExecAdapter({ debug: () => {} } as never);
+    await expect(
+      adapter.deliverToThread("t-1", "prompt", {
+        sandbox: "workspace-write",
+        networkAccess: true,
+      }),
+    ).rejects.toThrow(PermanentError);
+    await expect(
+      adapter.startThread("prompt", {
+        sandbox: "workspace-write",
+        networkAccess: true,
+      }),
+    ).rejects.toThrow(PermanentError);
   });
 });

@@ -235,8 +235,18 @@ footing as Slack/GitHub. Alternatively, keep email read-only for triage and rout
 DM to the bot, a signed webhook from a Shortcut) — use the right medium for the
 trust level.
 
-Related hardening still open (see the security-review round): make sandbox
-network-off explicit and identical across all three adapters (today only the
-app-server adapter forces `networkAccess: false` for `workspace-write`; the SDK
-and exec adapters inherit Codex's default), and warn at route-creation time when a
-route pairs an untrusted-content source with `workspace-write`.
+### Event-Driven Codex Review Remediation Loop Architecture (2026-08-21)
+
+1. **External Authority Delegation (`codex-grok-review`):**
+   WakeWire and LLM agents do not hand-parse raw GitHub review comments or issue comments for review verdicts. The external, tested `codex-grok-review` tool is the sole source of truth for review verdicts, severity levels (P0-P4), line locations, and re-review requests (`request <PR>`). Webhook payloads act solely as an authenticated trigger and pointer.
+2. **Trailing-Edge Settling (`settleSeconds`):**
+   When GitHub emits multiple review comments across a review pass, per-delivery dispatch would waste agent tokens and spawn competing remediation passes. Durable trailing-edge settling resets the route's delivery deadline to `now + settleSeconds` on every incoming live event. All sibling deliveries in the window coalesce into a single carrier delivery carrying a settle-window digest prompt. Settle state is stored synchronously in SQLite `next_attempt_at`, surviving restarts without per-route timer leaks.
+3. **Explicit Unattended Network Access Grant:**
+   Routes require `networkAccess: boolean` (default `false`). Only GitHub routes with `sandbox: "workspace-write"` may opt into `networkAccess: true` to allow test execution, commit pushing, and re-review requesting. `CodexSdkAdapter` and `CodexExecAdapter` fail closed with `PermanentError` when `networkAccess: true` is requested, as only `CodexAppServerAdapter` can enforce per-turn granular sandbox policies with `approvalPolicy: "never"`.
+4. **Exact PR & Actor Scoping:**
+   Routes support `pullRequests: number[]` and `actors: string[]` in `GithubMatchSchema`. Webhooks matching wrong PRs or human actors are ignored, preventing non-bot commentary from re-triggering automated remediation.
+5. **State Marker Protocol & Git Trailer Evidence:**
+   The review loop maintains state via the assistant-authored `WAKEWIRE_REVIEW_STATE` marker in the conversation transcript and `WakeWire-Review-PR` / `WakeWire-Review-Round` git commit trailers. This ensures the 5-round remediation cap and execution state can be audited and recovered directly from Git history.
+6. **App Server Capability Admission Preflight & M5 Status (2026-08-21):**
+   - **Step 1 Capability Admission Evidence:** Verified on `codex-cli 0.149.0` and recorded at `/private/tmp/wakewire-codex-review-admission.md` (turn `01a026ad-6f06-7b50-a242-83c9323898b4`, target PR `https://github.com/bmorrison/wakewire/pull/4` on branch `disposable/codex-review-loop-exec`, commit `72c17cf`). Passed all required capabilities under `{ "approvalPolicy": "never", "sandboxPolicy": { "type": "workspaceWrite", "writableRoots": [], "networkAccess": true, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false } }`: executing `codex-grok-review status 4`, creating and removing scratch working-tree files, staging and creating a normal commit (`72c17cf`), pushing without force to `origin disposable/codex-review-loop-exec`, and completing the turn cleanly. This records pre-implementation capability admission, not a completed M5 findings-to-clean cycle; the disposable PR/branch has since been closed and deleted by the supervisor.
+   - **Milestone 5 Live Execution Status:** All automated unit and integration test suites (including webhook normalization, routing, migration, durable settle coalescing, signed ingress verification, and adapter sandbox policies with deterministic clocks and fake adapters) are complete and passing. In this isolated local repository snapshot (where external network and git remote mutations are intentionally prohibited), full live M5 external execution against a real GitHub PR is pending supervisor execution following code review.

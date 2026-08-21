@@ -134,6 +134,36 @@ itself is your infra to stand up and test.)
 
 ---
 
+## Event-Driven Codex Code Review Remediation Loop
+
+For autonomous, event-driven remediation of GitHub PR reviews posted by Codex Code Review (`chatgpt-codex-connector[bot]`):
+
+### Prerequisites
+1. **Shared App Server:** Configure `sink.appServerListen` and attach your interactive session:
+   ```bash
+   wakewire config set sink.appServerListen ws://127.0.0.1:4571
+   wakewire stop && wakewire start --detach
+   codex --remote ws://127.0.0.1:4571
+   ```
+2. **Review Skill:** Ensure `codex-grok-review` is installed and runnable in the session.
+3. **GitHub Ingress:** Create a GitHub source subscribing to reviews and review comments (listen mode recommended for private repos).
+
+### Route Setup
+In the interactive Codex session on the PR branch, paste:
+> Use $wakewire-setup to set up an automated Codex review remediation loop for PR #143 on OWNER/REPO.
+
+The resulting route uses:
+- **`match.events`:** `["pull_request_review.submitted", "pull_request_review_comment.created", "issue_comment.created"]`
+- **`match.pullRequests`:** `[143]` (scoping events strictly to this PR)
+- **`match.actors`:** `["chatgpt-codex-connector[bot]"]` (user-configurable; upstream bot login changes safely result in non-delivery until updated)
+- **`settleSeconds`:** `45` (trailing-edge quiet window coalescing multi-comment reviews into one settle-window digest turn)
+- **`sandbox`:** `"workspace-write"`
+- **`networkAccess`:** `true` (explicit unattended network access grant)
+
+See [recipes/codex-review-loop.md](../recipes/codex-review-loop.md) for the full recipe and state machine.
+
+---
+
 ## Gmail
 
 Two auth options. **App password** is simplest (no Google Cloud project); OAuth

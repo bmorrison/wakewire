@@ -2,6 +2,8 @@ import type { SandboxPolicy } from "../core/route.js";
 
 export interface DeliveryOptions {
   sandbox: SandboxPolicy;
+  /** Whether outbound network access is granted to the sandbox. */
+  networkAccess: boolean;
   /** Working directory override (used for new threads; ignored for resume by some adapters). */
   cwd?: string | undefined;
 }

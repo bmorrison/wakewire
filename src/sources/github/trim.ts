@@ -25,6 +25,19 @@ export function trimGithubEvent(args: {
   if (eventName === "pull_request") {
     return trimPullRequest({ repo, kind, action, deliveryId, occurredAt, payload });
   }
+  if (eventName === "pull_request_review") {
+    return trimPullRequestReview({ repo, kind, action, deliveryId, occurredAt, payload });
+  }
+  if (eventName === "pull_request_review_comment") {
+    return trimPullRequestReviewComment({ repo, kind, action, deliveryId, occurredAt, payload });
+  }
+  if (
+    eventName === "issue_comment" &&
+    isRecord(payload.issue) &&
+    isRecord(payload.issue.pull_request)
+  ) {
+    return trimPullRequestIssueComment({ repo, kind, action, deliveryId, occurredAt, payload });
+  }
   if (eventName === "issues") {
     return trimIssue({ repo, kind, action, deliveryId, occurredAt, payload });
   }
@@ -106,6 +119,7 @@ function trimPullRequest(args: {
   const author = isRecord(pr.user) && typeof pr.user.login === "string" ? pr.user.login : "unknown";
   const url = typeof pr.html_url === "string" ? pr.html_url : "";
   const headBranch = isRecord(pr.head) && typeof pr.head.ref === "string" ? pr.head.ref : "";
+  const headSha = isRecord(pr.head) && typeof pr.head.sha === "string" ? pr.head.sha : "";
   const baseBranch = isRecord(pr.base) && typeof pr.base.ref === "string" ? pr.base.ref : "";
   return {
     source: "github",
@@ -122,9 +136,170 @@ function trimPullRequest(args: {
       url,
       branch: headBranch,
       baseBranch,
+      headSha,
       body: truncate(typeof pr.body === "string" ? pr.body : "", 1000),
     },
   };
+}
+
+function trimPullRequestReview(args: {
+  repo: string;
+  kind: string;
+  action: string | undefined;
+  deliveryId: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}): WakeEvent {
+  const { repo, kind, action, deliveryId, occurredAt, payload } = args;
+  const pr = isRecord(payload.pull_request) ? payload.pull_request : {};
+  const review = isRecord(payload.review) ? payload.review : {};
+  const number =
+    typeof payload.number === "number"
+      ? payload.number
+      : typeof pr.number === "number"
+        ? pr.number
+        : null;
+  const title = typeof pr.title === "string" ? truncate(pr.title, 200) : "";
+  const actor = resolveActor(payload, review);
+  const prUrl = typeof pr.html_url === "string" ? pr.html_url : "";
+  const activityUrl = typeof review.html_url === "string" ? review.html_url : "";
+  const headBranch = isRecord(pr.head) && typeof pr.head.ref === "string" ? pr.head.ref : "";
+  const headSha = isRecord(pr.head) && typeof pr.head.sha === "string" ? pr.head.sha : "";
+  const baseBranch = isRecord(pr.base) && typeof pr.base.ref === "string" ? pr.base.ref : "";
+  const reviewState = typeof review.state === "string" ? review.state : "";
+
+  return {
+    source: "github",
+    kind,
+    deliveryId,
+    occurredAt,
+    summary: `PR #${number ?? "?"} review ${action ?? ""} on ${repo} by ${actor}`.trim(),
+    payload: {
+      repo,
+      action: action ?? "",
+      number,
+      title,
+      actor,
+      prUrl,
+      activityUrl,
+      branch: headBranch,
+      baseBranch,
+      headSha,
+      reviewState,
+    },
+  };
+}
+
+function trimPullRequestReviewComment(args: {
+  repo: string;
+  kind: string;
+  action: string | undefined;
+  deliveryId: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}): WakeEvent {
+  const { repo, kind, action, deliveryId, occurredAt, payload } = args;
+  const pr = isRecord(payload.pull_request) ? payload.pull_request : {};
+  const comment = isRecord(payload.comment) ? payload.comment : {};
+  const number =
+    typeof payload.number === "number"
+      ? payload.number
+      : typeof pr.number === "number"
+        ? pr.number
+        : null;
+  const title = typeof pr.title === "string" ? truncate(pr.title, 200) : "";
+  const actor = resolveActor(payload, comment);
+  const prUrl = typeof pr.html_url === "string" ? pr.html_url : "";
+  const activityUrl = typeof comment.html_url === "string" ? comment.html_url : "";
+  const headBranch = isRecord(pr.head) && typeof pr.head.ref === "string" ? pr.head.ref : "";
+  const headSha = isRecord(pr.head) && typeof pr.head.sha === "string" ? pr.head.sha : "";
+  const baseBranch = isRecord(pr.base) && typeof pr.base.ref === "string" ? pr.base.ref : "";
+  const path = typeof comment.path === "string" ? comment.path : "";
+  const line =
+    typeof comment.line === "number"
+      ? comment.line
+      : typeof comment.original_line === "number"
+        ? comment.original_line
+        : null;
+
+  return {
+    source: "github",
+    kind,
+    deliveryId,
+    occurredAt,
+    summary: `PR #${number ?? "?"} review comment ${action ?? ""} on ${repo} by ${actor}`.trim(),
+    payload: {
+      repo,
+      action: action ?? "",
+      number,
+      title,
+      actor,
+      prUrl,
+      activityUrl,
+      branch: headBranch,
+      baseBranch,
+      headSha,
+      path,
+      line,
+    },
+  };
+}
+
+function trimPullRequestIssueComment(args: {
+  repo: string;
+  kind: string;
+  action: string | undefined;
+  deliveryId: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}): WakeEvent {
+  const { repo, kind, action, deliveryId, occurredAt, payload } = args;
+  const issue = isRecord(payload.issue) ? payload.issue : {};
+  const comment = isRecord(payload.comment) ? payload.comment : {};
+  const number = typeof issue.number === "number" ? issue.number : null;
+  const title = typeof issue.title === "string" ? truncate(issue.title, 200) : "";
+  const actor = resolveActor(payload, comment);
+  const prUrl =
+    isRecord(issue.pull_request) && typeof issue.pull_request.html_url === "string"
+      ? issue.pull_request.html_url
+      : typeof issue.html_url === "string"
+        ? issue.html_url
+        : "";
+  const activityUrl = typeof comment.html_url === "string" ? comment.html_url : "";
+
+  return {
+    source: "github",
+    kind,
+    deliveryId,
+    occurredAt,
+    summary: `PR #${number ?? "?"} comment ${action ?? ""} on ${repo} by ${actor}`.trim(),
+    payload: {
+      repo,
+      action: action ?? "",
+      number,
+      title,
+      actor,
+      prUrl,
+      activityUrl,
+    },
+  };
+}
+
+function resolveActor(
+  payload: Record<string, unknown>,
+  fallbackObject?: Record<string, unknown>,
+): string {
+  if (isRecord(payload.sender) && typeof payload.sender.login === "string") {
+    return payload.sender.login;
+  }
+  if (
+    fallbackObject &&
+    isRecord(fallbackObject.user) &&
+    typeof fallbackObject.user.login === "string"
+  ) {
+    return fallbackObject.user.login;
+  }
+  return "unknown";
 }
 
 function trimIssue(args: {

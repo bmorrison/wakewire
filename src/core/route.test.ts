@@ -140,22 +140,197 @@ describe("RouteInputSchema", () => {
     expect(ok.success).toBe(true);
   });
 
-  it("rejects unknown target types and missing thread ids", () => {
+  it("validates github pullRequests and actors filters", () => {
+    const valid = RouteInputSchema.safeParse({
+      name: "codex review",
+      source: "github",
+      match: {
+        repo: "acme/api",
+        events: ["pull_request_review_comment.created"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+      target: { type: "thread", threadId: "t-1" },
+    });
+    expect(valid.success).toBe(true);
+    expect(valid.data?.match).toEqual({
+      repo: "acme/api",
+      events: ["pull_request_review_comment.created"],
+      pullRequests: [143],
+      actors: ["chatgpt-codex-connector[bot]"],
+    });
+
+    // Rejects empty arrays
     expect(
       RouteInputSchema.safeParse({
-        name: "x",
+        name: "bad",
         source: "github",
-        match: { repo: "a/b" },
-        target: { type: "thread" },
+        match: { repo: "acme/api", pullRequests: [] },
+        target: { type: "thread", threadId: "t-1" },
       }).success,
     ).toBe(false);
     expect(
       RouteInputSchema.safeParse({
-        name: "x",
+        name: "bad",
         source: "github",
-        match: { repo: "a/b" },
-        target: { type: "triage-inbox" },
+        match: { repo: "acme/api", actors: [] },
+        target: { type: "thread", threadId: "t-1" },
       }).success,
     ).toBe(false);
+
+    // Rejects non-positive or non-integer PR numbers
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api", pullRequests: [0] },
+        target: { type: "thread", threadId: "t-1" },
+      }).success,
+    ).toBe(false);
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api", pullRequests: [-5] },
+        target: { type: "thread", threadId: "t-1" },
+      }).success,
+    ).toBe(false);
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api", pullRequests: [1.5] },
+        target: { type: "thread", threadId: "t-1" },
+      }).success,
+    ).toBe(false);
+
+    // Rejects empty actor strings
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api", actors: [""] },
+        target: { type: "thread", threadId: "t-1" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates settleSeconds range (1..3600)", () => {
+    const valid = RouteInputSchema.safeParse({
+      name: "settle",
+      source: "github",
+      match: { repo: "acme/api" },
+      target: { type: "thread", threadId: "t-1" },
+      settleSeconds: 45,
+    });
+    expect(valid.success).toBe(true);
+    expect(valid.data?.settleSeconds).toBe(45);
+
+    // Rejects 0, negative, float, > 3600
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api" },
+        target: { type: "thread", threadId: "t-1" },
+        settleSeconds: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api" },
+        target: { type: "thread", threadId: "t-1" },
+        settleSeconds: -10,
+      }).success,
+    ).toBe(false);
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api" },
+        target: { type: "thread", threadId: "t-1" },
+        settleSeconds: 3601,
+      }).success,
+    ).toBe(false);
+    expect(
+      RouteInputSchema.safeParse({
+        name: "bad",
+        source: "github",
+        match: { repo: "acme/api" },
+        target: { type: "thread", threadId: "t-1" },
+        settleSeconds: 45.5,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates networkAccess: defaults to false, allowed only on github workspace-write routes", () => {
+    // Default is false
+    const def = RouteInputSchema.parse({
+      name: "gh",
+      source: "github",
+      match: { repo: "acme/api" },
+      target: { type: "thread", threadId: "t-1" },
+    });
+    expect(def.networkAccess).toBe(false);
+
+    // Allowed on github + workspace-write
+    const allowed = RouteInputSchema.safeParse({
+      name: "gh write",
+      source: "github",
+      match: { repo: "acme/api" },
+      target: { type: "thread", threadId: "t-1" },
+      sandbox: "workspace-write",
+      networkAccess: true,
+    });
+    expect(allowed.success).toBe(true);
+    expect(allowed.data?.networkAccess).toBe(true);
+
+    // Rejected on github + read-only
+    const rejectedReadOnly = RouteInputSchema.safeParse({
+      name: "gh ro",
+      source: "github",
+      match: { repo: "acme/api" },
+      target: { type: "thread", threadId: "t-1" },
+      sandbox: "read-only",
+      networkAccess: true,
+    });
+    expect(rejectedReadOnly.success).toBe(false);
+    expect(JSON.stringify(rejectedReadOnly.error?.issues)).toContain("networkAccess");
+
+    // Rejected on gmail
+    const rejectedGmail = RouteInputSchema.safeParse({
+      name: "gmail",
+      source: "gmail",
+      match: { label: "inbox" },
+      target: { type: "thread", threadId: "t-1" },
+      networkAccess: true,
+    });
+    expect(rejectedGmail.success).toBe(false);
+
+    // Rejected on slack
+    const rejectedSlack = RouteInputSchema.safeParse({
+      name: "slack",
+      source: "slack",
+      match: { channels: ["#dev"], events: ["message"] },
+      target: { type: "thread", threadId: "t-1" },
+      sandbox: "workspace-write",
+      networkAccess: true,
+    });
+    expect(rejectedSlack.success).toBe(false);
+    expect(JSON.stringify(rejectedSlack.error?.issues)).toContain("networkAccess");
+
+    // Rejected on generic webhook
+    const rejectedWebhook = RouteInputSchema.safeParse({
+      name: "webhook",
+      source: "webhook",
+      match: { provider: "sentry" },
+      target: { type: "thread", threadId: "t-1" },
+      sandbox: "workspace-write",
+      networkAccess: true,
+    });
+    expect(rejectedWebhook.success).toBe(false);
+    expect(JSON.stringify(rejectedWebhook.error?.issues)).toContain("networkAccess");
   });
 });

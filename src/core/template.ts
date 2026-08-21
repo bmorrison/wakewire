@@ -27,6 +27,13 @@ const SOURCE_FIELDS: Record<WakeEvent["source"], readonly string[]> = {
     "title",
     "author",
     "url",
+    "actor",
+    "prUrl",
+    "activityUrl",
+    "headSha",
+    "reviewState",
+    "path",
+    "line",
   ],
   gmail: ["label", "from", "to", "subject", "date"],
   // ts/threadTs are identifiers, not content — the wake-then-fetch pattern

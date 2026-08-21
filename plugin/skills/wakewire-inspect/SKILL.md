@@ -1,6 +1,6 @@
 ---
 name: wakewire-inspect
-description: Triage wakewire delivery problems — events not arriving, failed or held deliveries, duplicates, rate-limit digests. Use when the user asks why an expected event didn't show up in a thread, or wakewire tools report failures.
+description: Triage wakewire delivery problems — events not arriving, failed or held deliveries, duplicates, settle-window and rate-limit digests. Use when the user asks why an expected event didn't show up in a thread, or wakewire tools report failures.
 ---
 
 You are debugging wakewire deliveries. Work the pipeline in order: source → route → queue → sink.
@@ -22,7 +22,7 @@ You are debugging wakewire deliveries. Work the pipeline in order: source → ro
 - `held` — retrying with backoff (Codex app closed, thread busy, network). `error` has the reason, `nextAttemptAt` the next try. This self-heals; nothing to fix unless it persists.
 - `failed` — permanent (bad template field, deleted thread/route, or max retries). Read `error`.
 - `skipped-duplicate` — same source delivery id seen before (webhook redelivery). Expected, not a bug.
-- `coalesced` — folded into a digest turn because the route exceeded its rate limit; `coalescedInto` points at the digest delivery.
+- `coalesced` — folded into a digest turn (either because a `settleSeconds` quiet window coalesced multi-comment review activity, or because the route exceeded its `rateLimitPerMinute`); `coalescedInto` points at the carrier delivery. The carrier's rendered prompt header explicitly indicates whether coalescing was caused by a `"settle window"` or `"rate limit"`.
 
 The `renderedPrompt` field shows exactly what was (or would be) injected — use it to debug template issues.
 

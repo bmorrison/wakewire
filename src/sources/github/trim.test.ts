@@ -182,3 +182,256 @@ describe("trimGithubEvent — pull_request / issues / fallback", () => {
     expect(tag?.payload.branch).toBe("v1.0.0");
   });
 });
+
+describe("trimGithubEvent — pull_request_review / pull_request_review_comment / issue_comment", () => {
+  it("trims pull_request_review.submitted to exact PR pointer contract without body", () => {
+    const event = trimGithubEvent({
+      eventName: "pull_request_review",
+      deliveryId: "prr-1",
+      payload: {
+        action: "submitted",
+        repository: { full_name: "acme/api", description: "top secret" },
+        sender: { login: "chatgpt-codex-connector[bot]", id: 12345 },
+        review: {
+          id: 99,
+          state: "commented",
+          html_url: "https://github.com/acme/api/pull/143#pullrequestreview-99",
+          body: "Codex Review: Didn't find any major issues.",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+        pull_request: {
+          number: 143,
+          title: "Optimize query planner",
+          body: "PR description",
+          html_url: "https://github.com/acme/api/pull/143",
+          head: { ref: "feature/opt-planner", sha: "sha-head-143" },
+          base: { ref: "main" },
+        },
+      },
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.kind).toBe("pull_request_review.submitted");
+    expect(event?.deliveryId).toBe("prr-1");
+    expect(event?.source).toBe("github");
+    expect(event?.summary).toBe(
+      "PR #143 review submitted on acme/api by chatgpt-codex-connector[bot]",
+    );
+    expect(event?.payload).toEqual({
+      repo: "acme/api",
+      action: "submitted",
+      number: 143,
+      title: "Optimize query planner",
+      actor: "chatgpt-codex-connector[bot]",
+      prUrl: "https://github.com/acme/api/pull/143",
+      activityUrl: "https://github.com/acme/api/pull/143#pullrequestreview-99",
+      branch: "feature/opt-planner",
+      baseBranch: "main",
+      headSha: "sha-head-143",
+      reviewState: "commented",
+    });
+    // Verify exact keys
+    expect(Object.keys(event?.payload ?? {}).sort()).toEqual(
+      [
+        "action",
+        "activityUrl",
+        "actor",
+        "baseBranch",
+        "branch",
+        "headSha",
+        "number",
+        "prUrl",
+        "repo",
+        "reviewState",
+        "title",
+      ].sort(),
+    );
+    expect(JSON.stringify(event)).not.toContain("Didn't find any major issues");
+    expect(JSON.stringify(event)).not.toContain("top secret");
+  });
+
+  it("trims pull_request_review_comment.created to exact comment pointer contract", () => {
+    const event = trimGithubEvent({
+      eventName: "pull_request_review_comment",
+      deliveryId: "prrc-1",
+      payload: {
+        action: "created",
+        repository: { full_name: "acme/api" },
+        sender: { login: "chatgpt-codex-connector[bot]" },
+        comment: {
+          id: 88,
+          html_url: "https://github.com/acme/api/pull/143#discussion_r88",
+          path: "src/query.ts",
+          line: 42,
+          original_line: 40,
+          body: "![P1 Badge](https://...) Possible SQL injection vulnerability",
+        },
+        pull_request: {
+          number: 143,
+          title: "Optimize query planner",
+          html_url: "https://github.com/acme/api/pull/143",
+          head: { ref: "feature/opt-planner", sha: "sha-head-143" },
+          base: { ref: "main" },
+        },
+      },
+    });
+
+    expect(event?.kind).toBe("pull_request_review_comment.created");
+    expect(event?.summary).toBe(
+      "PR #143 review comment created on acme/api by chatgpt-codex-connector[bot]",
+    );
+    expect(event?.payload).toEqual({
+      repo: "acme/api",
+      action: "created",
+      number: 143,
+      title: "Optimize query planner",
+      actor: "chatgpt-codex-connector[bot]",
+      prUrl: "https://github.com/acme/api/pull/143",
+      activityUrl: "https://github.com/acme/api/pull/143#discussion_r88",
+      branch: "feature/opt-planner",
+      baseBranch: "main",
+      headSha: "sha-head-143",
+      path: "src/query.ts",
+      line: 42,
+    });
+    expect(Object.keys(event?.payload ?? {}).sort()).toEqual(
+      [
+        "action",
+        "activityUrl",
+        "actor",
+        "baseBranch",
+        "branch",
+        "headSha",
+        "line",
+        "number",
+        "path",
+        "prUrl",
+        "repo",
+        "title",
+      ].sort(),
+    );
+    expect(JSON.stringify(event)).not.toContain("SQL injection");
+  });
+
+  it("falls back to original_line when line is null in review comment", () => {
+    const event = trimGithubEvent({
+      eventName: "pull_request_review_comment",
+      deliveryId: "prrc-2",
+      payload: {
+        action: "created",
+        repository: { full_name: "acme/api" },
+        sender: { login: "reviewer" },
+        comment: {
+          html_url: "https://github.com/acme/api/pull/143#discussion_r89",
+          path: "src/query.ts",
+          line: null,
+          original_line: 55,
+        },
+        pull_request: {
+          number: 143,
+          title: "PR",
+          html_url: "https://github.com/acme/api/pull/143",
+          head: { ref: "feat", sha: "sha" },
+          base: { ref: "main" },
+        },
+      },
+    });
+
+    expect(event?.payload.line).toBe(55);
+  });
+
+  it("trims issue_comment.created on a PR to exact PR comment pointer contract", () => {
+    const event = trimGithubEvent({
+      eventName: "issue_comment",
+      deliveryId: "ic-1",
+      payload: {
+        action: "created",
+        repository: { full_name: "acme/api" },
+        sender: { login: "chatgpt-codex-connector[bot]" },
+        issue: {
+          number: 143,
+          title: "Optimize query planner",
+          html_url: "https://github.com/acme/api/pull/143",
+          pull_request: {
+            url: "https://api.github.com/repos/acme/api/pulls/143",
+            html_url: "https://github.com/acme/api/pull/143",
+          },
+        },
+        comment: {
+          id: 77,
+          html_url: "https://github.com/acme/api/pull/143#issuecomment-77",
+          body: "Codex Review: Something went wrong.",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      },
+    });
+
+    expect(event?.kind).toBe("issue_comment.created");
+    expect(event?.summary).toBe(
+      "PR #143 comment created on acme/api by chatgpt-codex-connector[bot]",
+    );
+    expect(event?.payload).toEqual({
+      repo: "acme/api",
+      action: "created",
+      number: 143,
+      title: "Optimize query planner",
+      actor: "chatgpt-codex-connector[bot]",
+      prUrl: "https://github.com/acme/api/pull/143",
+      activityUrl: "https://github.com/acme/api/pull/143#issuecomment-77",
+    });
+    expect(Object.keys(event?.payload ?? {}).sort()).toEqual(
+      ["action", "activityUrl", "actor", "number", "prUrl", "repo", "title"].sort(),
+    );
+    expect(JSON.stringify(event)).not.toContain("Something went wrong");
+  });
+
+  it("does not give PR fields to an issue_comment without issue.pull_request", () => {
+    const event = trimGithubEvent({
+      eventName: "issue_comment",
+      deliveryId: "ic-2",
+      payload: {
+        action: "created",
+        repository: { full_name: "acme/api" },
+        sender: { login: "sam" },
+        issue: {
+          number: 50,
+          title: "Plain issue",
+          html_url: "https://github.com/acme/api/issues/50",
+        },
+        comment: {
+          html_url: "https://github.com/acme/api/issues/50#issuecomment-1",
+          body: "I have this problem too",
+        },
+      },
+    });
+
+    expect(event?.kind).toBe("issue_comment.created");
+    expect(event?.payload).not.toHaveProperty("prUrl");
+    expect(event?.payload).not.toHaveProperty("activityUrl");
+  });
+
+  it("falls back to review/comment author login when sender is missing", () => {
+    const event = trimGithubEvent({
+      eventName: "pull_request_review",
+      deliveryId: "prr-2",
+      payload: {
+        action: "submitted",
+        repository: { full_name: "acme/api" },
+        review: {
+          state: "approved",
+          html_url: "https://github.com/acme/api/pull/143#pullrequestreview-100",
+          user: { login: "fallback-reviewer" },
+        },
+        pull_request: {
+          number: 143,
+          title: "PR",
+          html_url: "https://github.com/acme/api/pull/143",
+          head: { ref: "feat", sha: "sha" },
+          base: { ref: "main" },
+        },
+      },
+    });
+
+    expect(event?.payload.actor).toBe("fallback-reviewer");
+  });
+});

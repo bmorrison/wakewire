@@ -131,6 +131,14 @@ const MIGRATIONS: ReadonlyArray<{
       CREATE INDEX captures_source ON captures (source_id, received_at);
     `,
   },
+  {
+    version: 5,
+    name: "route-settle-and-network-access",
+    sql: `
+      ALTER TABLE routes ADD COLUMN settle_seconds INTEGER;
+      ALTER TABLE routes ADD COLUMN network_access INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /** targetVersion is for tests that need to exercise upgrade paths from older schemas. */

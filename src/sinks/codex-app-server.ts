@@ -144,7 +144,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         threadId,
         input: [{ type: "text", text: prompt }],
         approvalPolicy: "never",
-        sandboxPolicy: sandboxPolicyFor(opts),
+        sandboxPolicy: buildSandboxPolicy(opts),
         ...(this.config.model ? { model: this.config.model } : {}),
       });
       turnId = started.turn.id;
@@ -368,12 +368,12 @@ function finalMessageOf(turn: Turn): string | undefined {
   return messages[messages.length - 1]?.text ?? turn.streamedFinal;
 }
 
-function sandboxPolicyFor(opts: DeliveryOptions) {
+export function buildSandboxPolicy(opts: DeliveryOptions) {
   if (opts.sandbox === "workspace-write") {
     return {
       type: "workspaceWrite",
       writableRoots: opts.cwd ? [opts.cwd] : [],
-      networkAccess: false,
+      networkAccess: opts.networkAccess,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
     };

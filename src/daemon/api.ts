@@ -52,7 +52,12 @@ export function createApi(ctx: ApiContext): Hono {
       version: VERSION,
       pid: process.pid,
       startedAt: ctx.startedAt,
-      adapter: { name: ctx.adapter.name, codexReachable: reachable },
+      adapter: {
+        name: ctx.adapter.name,
+        codexReachable: reachable,
+        networkEnabledRoutesSupported: ctx.adapter.name === "codex-app-server",
+        sharedServerConfigured: Boolean(ctx.config.appServerListen),
+      },
       queueDepth: ctx.queue.queueDepth(),
       sources: ctx.sources.statuses(),
       secretsBackend: ctx.secrets.backend,
@@ -445,6 +450,7 @@ export function createApi(ctx: ApiContext): Hono {
     try {
       const result = await ctx.adapter.deliverToThread(parsed.data.threadId, parsed.data.prompt, {
         sandbox: parsed.data.sandbox,
+        networkAccess: false,
       });
       return c.json({ result });
     } catch (err) {

@@ -117,21 +117,24 @@ CLI (plumbing only): `wakewire init | start | stop | status | logs | auth gmail 
 
 A route = match + target + prompt template + sandbox.
 
-- **Match** — GitHub: `{repo, events: ["push", "pull_request.opened", ...], branches?}`.
+- **Match** — GitHub: `{repo, events: ["push", "pull_request.opened", "pull_request_review_comment.created", ...], branches?, pullRequests?, actors?}`.
   Gmail: `{label, fromContains?}`; a label is required — watch-everything routes are
   rejected by design. Slack: `{events: ["app_mention"]}` or
   `{channels: ["#dev"], events: ["message"], fromUser?, textContains?}`.
 - **Target** — an existing thread (`{type:"thread",threadId}`) or a fresh one per event
   (`{type:"new-thread",cwd,worktree?}`; `worktree:true` runs each delivery in a
   detached git worktree under `~/.wakewire/worktrees`).
-- **Sandbox** — `read-only` (default, and forced for gmail) or `workspace-write`
-  (github/slack/webhook routes, opt-in — see SECURITY.md before enabling it on
-  sources whose content strangers can influence). Applied per injected turn.
+- **Sandbox & Network** — `read-only` (default, and forced for gmail) or `workspace-write`
+  (github/slack/webhook routes, opt-in). Outbound network access (`networkAccess: true`) is an
+  explicit grant allowed only on GitHub `workspace-write` routes (e.g. for PR review remediation loops).
+- **Settle Window & Rate Limiting** — `settleSeconds` defines a trailing-edge quiet window
+  (e.g. 45s) where multiple incoming events (like GitHub review comments) coalesce into a single
+  settle-window digest turn. Normal bursts exceeding `rateLimitPerMinute` coalesce into rate-limit digests.
 
 Deliveries are deduplicated by the source's delivery id, serialized per thread
 (never two turns in flight on one thread from wakewire), retried with capped
-backoff whenever Codex is unreachable, and coalesced into a single digest turn if a
-route exceeds its rate limit (default 10/minute).
+backoff whenever Codex is unreachable, and coalesced into digest turns when settle windows or rate limits apply.
+Ready-made recipes including [Event-Driven Codex Review Remediation](recipes/codex-review-loop.md) live in [recipes/](recipes/).
 
 ## How injection works (and its limits)
 

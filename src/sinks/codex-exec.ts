@@ -29,6 +29,11 @@ export class CodexExecAdapter implements AgentAdapter {
     prompt: string,
     opts: DeliveryOptions,
   ): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const { args, lastMessageFile } = this.baseArgs(opts);
     // "-" reads the prompt from stdin — rendered prompts can exceed argv limits.
     args.push("resume", threadId, "-");
@@ -40,6 +45,11 @@ export class CodexExecAdapter implements AgentAdapter {
   }
 
   async startThread(prompt: string, opts: DeliveryOptions): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const { args, lastMessageFile } = this.baseArgs(opts, { cd: true });
     args.push("-");
     const { stdout } = await this.run(args, null, prompt);

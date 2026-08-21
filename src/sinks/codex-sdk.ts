@@ -37,12 +37,22 @@ export class CodexSdkAdapter implements AgentAdapter {
     prompt: string,
     opts: DeliveryOptions,
   ): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const thread = this.codex.resumeThread(threadId, this.threadOptions(opts));
     const turn = await this.runMapped(() => thread.run(prompt), threadId);
     return { threadId, finalResponse: turn.finalResponse };
   }
 
   async startThread(prompt: string, opts: DeliveryOptions): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const thread = this.codex.startThread(this.threadOptions(opts));
     const turn = await this.runMapped(() => thread.run(prompt), null);
     if (!thread.id) throw new UnreachableError("codex did not report a thread id");
