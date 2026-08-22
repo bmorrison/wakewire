@@ -18,8 +18,8 @@ This document specifies the concrete, step-by-step verification checklist for Mi
 - [x] **Semantic Skill & State Machine:** `$wakewire-codex-review-loop` runbook enforces `WAKEWIRE_REVIEW_STATE` marker, commit trailers, 5-round cap, 3-error cap, and safe stops.
 
 ### Live Supervisor Validation Checklist (Pending Live Execution)
-- [ ] **1. Shared App Server Topology:** Start daemon with `sink.appServerListen: ws://127.0.0.1:<PORT>` and attach interactive CLI via `codex --remote ws://127.0.0.1:<PORT>` on checked-out `<BRANCH>`.
-- [ ] **2. Review Route Registration:** Create route targeting `<CODEX_THREAD_ID>` with `pullRequests: [<PR_NUMBER>]`, `actors: ["chatgpt-codex-connector[bot]"]`, `sandbox: "workspace-write"`, `networkAccess: true`, and `settleSeconds: 45`.
+- [ ] **1. Shared App Server Topology:** Start daemon with `sink.appServerListen: ws://127.0.0.1:<PORT>` and attach interactive CLI via `codex --remote ws://127.0.0.1:<PORT>` in the verified PR-head checkout.
+- [ ] **2. Review Route Registration:** Resolve the PR's authoritative base/head/default-branch metadata, select exactly one existing `<HEAD_REMOTE>` whose normalized fetch and push URLs both match the head repository, then create the route targeting `<CODEX_THREAD_ID>` with `pullRequests: [<PR_NUMBER>]`, `actors: ["chatgpt-codex-connector[bot]"]`, `sandbox: "workspace-write"`, `networkAccess: true`, and `settleSeconds: 45`. Refuse zero/multiple matches; never add/change a remote or assume `origin`.
 - [ ] **3. Ingress Settling & Coalescing Verification:** POST one signed `pull_request_review.submitted` and two `pull_request_review_comment.created` fixtures; verify exactly one settled turn delivers after 45s, newest delivery is carrier, and two earlier rows show `status: "coalesced"`.
 - [ ] **4. Negative Filter & Dedup Verification:** POST fixtures with wrong actor, wrong PR number, and duplicate delivery IDs; verify no additional turn is triggered.
 - [ ] **5. Replay Isolation:** Call `wakewire_replay` on a prior delivery; verify immediate execution without joining the live settle cohort.
@@ -36,7 +36,6 @@ Define these placeholders for live execution:
 ```bash
 export REPO="<owner>/<repo>"              # e.g. "bmorrison/wakewire"
 export PR_NUMBER="<PR_NUMBER>"             # e.g. 4
-export BRANCH="<PR_BRANCH>"               # e.g. "feature/test-pr"
 export APP_PORT="4571"
 export LISTEN_URL="ws://127.0.0.1:${APP_PORT}"
 export WAKEWIRE_HOME="$(mktemp -d)"
@@ -57,13 +56,15 @@ export API_PORT="4570"
    ```
    *Expect:* `adapter.codexReachable: true`, `adapter.networkEnabledRoutesSupported: true`, `adapter.sharedServerConfigured: true`.
 
-2. In the target PR checkout directory on `<BRANCH>`, attach the Codex CLI session:
+2. In the target PR checkout directory, resolve metadata and the head remote before attaching the Codex CLI session:
    ```bash
    cd "/path/to/${REPO}"
-   git checkout "${BRANCH}"
+   gh repo view "${REPO}" --json nameWithOwner,defaultBranchRef
+   gh pr view "${PR_NUMBER}" --repo "${REPO}" --json number,headRepository,headRepositoryOwner,headRefName,headRefOid,isCrossRepository
+   git remote
    codex --remote "${LISTEN_URL}"
    ```
-   In the attached session, resolve the thread ID:
+   Require `nameWithOwner` from `gh repo view` to equal the registered `${REPO}` base repository; the PR query's explicit `--repo "${REPO}"` context plus its matching PR number verifies the base PR identity. Record the returned head repository, head branch, head SHA, and default branch. Normalize the effective fetch and push URLs for every existing remote; select exactly one `<HEAD_REMOTE>` only if both URLs match the head repository. Do not add/change remotes or assume `origin`. Fetch `<verified-pr-head-branch>` from `<HEAD_REMOTE>` and verify `FETCH_HEAD`, local `HEAD`, and the authoritative PR head SHA are identical; otherwise stop the checklist. This also proves a same-named base-repository branch cannot be chosen by accident. In the attached session, resolve the thread ID:
    ```bash
    echo "$CODEX_THREAD_ID"
    ```
@@ -149,7 +150,8 @@ Sign each payload with HMAC-SHA256 using `${SECRET}` and POST to `http://127.0.0
      WakeWire-Review-PR: ${REPO}#${PR_NUMBER}
      WakeWire-Review-Round: 1
      ```
-   - Pushed via `git push origin HEAD:<BRANCH>` (no force).
+   - Re-resolves PR metadata and the exact-one `<HEAD_REMOTE>` mapping immediately before commit/push; fetches `<verified-pr-head-branch>` and verifies fetched SHA, local pre-commit `HEAD`, and authoritative PR head SHA still match.
+   - Pushed via `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` (no force).
    - Re-review requested via `codex-grok-review request ${PR_NUMBER}`.
    - Assistant emits `WAKEWIRE_REVIEW_STATE` with `outcome: "requested"`, `remediationRounds: 1`, `lastRequestedHead: <NEW_SHA>`.
    - Turn finishes and goes idle (no polling loop).

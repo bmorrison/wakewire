@@ -24,6 +24,8 @@ Wake an attached Codex CLI session on OpenAI Codex Code Review webhook events, a
    - `Pull request review comments` (`pull_request_review_comment`)
    - `Issue comments` (`issue_comment`)
    *(Mode `listen` behind a secure tunnel is recommended for private or loss-sensitive repositories.)*
+5. **Verified PR Head Remote**:
+   Resolve normal GitHub metadata for the target PR's base repository/identity, head repository owner/name, head branch, head SHA, and default branch. Inspect existing Git remotes and normalize each remote's effective fetch and push URLs to the authoritative GitHub host/owner/repo identity. Select exactly one `<HEAD_REMOTE>` only when both URLs match the PR head repository. Refuse registration if no remote or multiple remotes match; never add/change a remote or assume `origin`. Fetch from `<HEAD_REMOTE>` and require fetched SHA, local `HEAD`, and authoritative PR head SHA to match before registration. This prevents a same-named branch on the base repository from being selected accidentally.
 
 ## Route Configuration
 
@@ -55,7 +57,7 @@ Call `wakewire_route_add` with the following parameters:
 ```
 
 > **Security & Authorization Warning**:
-> Creating this route grants standing authorization for this specific PR to edit local files on the checked-out PR branch, execute repository test/build scripts, create normal Git commits with `WakeWire-Review-*` trailers, push to `origin HEAD:<branch>` without force, and post re-review requests. It never grants permission to merge, rebase, force-push, close the PR, or touch other branches/repositories.
+> Creating this route grants standing authorization for this specific PR to edit local files on the checked-out PR branch, execute repository test/build scripts, create normal Git commits with `WakeWire-Review-*` trailers, push only to the verified head remote via `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` without force, and post re-review requests. It never grants permission to add/change remotes, merge, rebase, force-push, close the PR, or touch other branches/repositories.
 
 ## Initial State Marker
 

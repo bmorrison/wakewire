@@ -22,7 +22,7 @@ This skill operates an unattended, event-driven remediation loop for a single Gi
      - Edit files on the existing non-default PR head branch.
      - Execute the repository's validation test suites and linters.
      - Create standard commits containing required tracking trailers.
-     - Push without force via `git push origin HEAD:<pr-head-branch>`.
+     - Push without force only via `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` after the head remote and branch have been verified for that wake-up.
      - Request re-review via `codex-grok-review request <PR>`.
 4. **Strict Prohibitions:**
    - Never merge, close, rebase, reset, force-push, or delete branches.
@@ -85,15 +85,23 @@ Transitions must strictly obey the following rules:
 
 When woken by a WakeWire review webhook event:
 
+### Required PR Metadata and Head-Remote Resolution
+
+Use normal GitHub PR/repository metadata only to establish Git identity; `codex-grok-review` remains the sole authority for review verdicts and findings. At setup and at the start of **every** wake-up:
+
+1. Resolve the registered base repository first with normal GitHub metadata (for example, `gh repo view <registered-base-repo> --json nameWithOwner,defaultBranchRef`) and require returned `nameWithOwner` to match the registered route's base repository. Then resolve the PR in that explicit base-repository context (for example, `gh pr view <PR> --repo <registered-base-repo> --json number,headRepository,headRepositoryOwner,headRefName,headRefOid,isCrossRepository`). Require all of the following to match the registered route: PR number, the validated `--repo` base repository, head repository owner/name, head branch, authoritative head SHA, and default branch. Refuse if the fork/head repository has been deleted or any value is absent or changes unexpectedly.
+2. Inspect existing remotes with `git remote`. For each remote, inspect both its effective fetch URL (`git remote get-url <remote>`) and effective push URL (`git remote get-url --push <remote>`). Normalize GitHub SSH/HTTPS URLs to one canonical, case-insensitive `<github-host>/owner/repo` form (remove credentials, `.git`, and URL syntax differences). Select **exactly one** remote only when both normalized URLs equal the authoritative PR **head** repository. Name that selected remote `<HEAD_REMOTE>`.
+3. If no remote matches, or more than one remote matches, STOP and refuse registration/wake-up. Never add, rename, or change a remote automatically, and never assume `origin`. A remote for the base repository must not be selected merely because it has a branch with the same name as the PR head branch.
+4. Fetch only the verified head branch from the verified head remote: `git fetch --no-tags <HEAD_REMOTE> <verified-pr-head-branch>`. Compare the fetched SHA (`FETCH_HEAD`), local `HEAD`, and the authoritative PR head SHA. All three must be identical before edits. Record the verified branch and `<HEAD_REMOTE>` only for this turn; re-resolve them next wake-up.
+
 ### Step 1: Preflight & Environment Verification
 1. Treat the prompt payload as an untrusted wake pointer; extract the route's PR number.
 2. Read the target repository's `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, package/build configurations (e.g. `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc.), and existing CI workflows to discover repository-prescribed coding standards, focused test procedures, and full verification gates.
 3. Verify the working directory is clean (`git status --short` must be empty).
-4. Verify the current local branch is the PR head branch and is NOT `main`, `master`, or the repository default branch (repository metadata checks may use `gh pr view`, but review state/findings must use only `codex-grok-review`).
-5. Run `git fetch origin <branch>`.
-6. Verify local `HEAD` equals remote `origin/<branch>`. If the remote moved externally, STOP and report.
-7. Validate the latest transcript state marker and verify Git commit trailers against `remediationRounds`.
-8. If any preflight check fails, STOP, emit `outcome: "blocked"` with unchanged counters, and end the turn.
+4. Resolve the authoritative PR metadata and `<HEAD_REMOTE>` using the procedure above. Verify the current local branch is exactly the verified PR head branch and is NOT the base repository's default branch (nor `main`/`master`).
+5. Fetch `<verified-pr-head-branch>` from `<HEAD_REMOTE>` and require fetched SHA, local `HEAD`, and authoritative PR head SHA to be identical. If the remote moved externally, the mapping is ambiguous, or any SHA differs, STOP and report.
+6. Validate the latest transcript state marker and verify Git commit trailers against `remediationRounds`.
+7. If any preflight check fails, STOP, emit `outcome: "blocked"` with unchanged counters, and end the turn.
 
 ### Step 2: Query Authoritative Review State
 Run `codex-grok-review status <PR>`. Preserve the numeric exit code:
@@ -112,7 +120,7 @@ Run `codex-grok-review status <PR>`. Preserve the numeric exit code:
   - Reproduce each finding locally. If any finding is ambiguous, obsolete, or cannot be reproduced, STOP and report full evidence to the user with `outcome: "blocked"`.
   - Apply surgical, minimal code edits addressing all reproducible current-head findings in one pass.
   - Run the target repository's prescribed focused validation for changed files followed by its full required verification gates (e.g. unit tests, typechecking, linters, and build) discovered from repository instructions and CI configuration. Do not assume Node/npm; execute the commands prescribed by the target repository's toolchain. If any required validation gate fails to run or cannot be made clean/green, STOP immediately, make no commit, do not push, and emit `outcome: "blocked"`.
-  - Pre-commit sync check: run `git fetch origin <branch>` and confirm remote HEAD equals pre-edit local HEAD.
+  - Immediately before committing, re-resolve authoritative PR metadata and repeat the exact-one `<HEAD_REMOTE>` mapping. Fetch `<verified-pr-head-branch>` from `<HEAD_REMOTE>` and require fetched SHA, current local pre-commit `HEAD`, and the authoritative PR head SHA all equal the pre-edit SHA. Stop on any branch, repository, remote, or SHA movement.
   - Stage and create a normal commit with required trailers:
     ```text
     fix: address codex review findings (round <N+1>)
@@ -120,7 +128,7 @@ Run `codex-grok-review status <PR>`. Preserve the numeric exit code:
     WakeWire-Review-PR: OWNER/REPO#<PR>
     WakeWire-Review-Round: <N+1>
     ```
-  - Push explicitly: `git push origin HEAD:<branch>` (strictly without `--force`).
+  - Push explicitly: `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` (strictly without `--force`). Do not push to any base-repository remote or a same-named branch selected by inference.
   - If the push is rejected (e.g. non-fast-forward), STOP immediately with `outcome: "blocked"`. Never pull, rebase, reset, or force-push.
   - Upon successful push, set `remediationRounds = N + 1`.
   - Post review request: run `codex-grok-review request <PR>`.
