@@ -211,6 +211,23 @@ Extend WakeWire so an explicitly registered, already-open Codex CLI session can 
     - Execute the M5 manual checklist before claiming live-session/autonomous-loop support. Record the tested Codex CLI version and App Server topology in `DECISIONS.md`, matching the repository's existing evidence style.
     - Do not archive or remove this plan until an independent reviewer verifies the automated gates and M5 evidence.
 
+### Supervised M5 live execution evidence (2026-08-21/22 UTC)
+
+This supervised, never-merged run used signed **local fixtures** as the runbook
+specifies; it does not claim public GitHub webhook reachability.
+
+| Evidence | Observed result |
+| --- | --- |
+| PR/topology | `bmorrison/wakewire` PR #3; Codex CLI `0.149.0`; shared loopback App Server; standalone clone `/private/tmp/wakewire-pr3-m5-clone`; attached thread `01a02735-22de-7273-b02f-fda5907c8054`. |
+| Route/baseline | Route `d744c2e2-3e6a-4ece-8e56-9abb4df7ae7e` was exact PR/actor scoped with workspace-write, network, and 45-second settling. The supervisor manually disabled it only after evidence capture; the green turn did not. Fault baseline was `3907df946d431545338907ae76b4d181081c8b85`. |
+| Delivery behavior | A signed three-event cohort coalesced to one carrier; wrong actor/wrong PR did not route; duplicate skipped; `b5e3baff-e9e7-4d59-8fb0-338e24b7c069` replay was immediate/outside cohort; busy delivery `2cf55b93-1672-4ae4-8adb-f8e4bb921c39` held 1/2/4/8 seconds and delivered once after recovery. |
+| Exit 2 | Real P1 `verifyGithubSignature()` regression reproduced and fixed by the resumed agent. Full validation passed: focused 4/4, coverage suite 105/105, typecheck, lint, build. One trailer-bearing remediation commit `c5c402337cc23c78fc7d38ff3b3759be3df84411` was non-force pushed and re-review requested exactly once; marker `outcome: "requested"`. |
+| Exit 0 | Signed delivery `20b17939-37a4-4a4c-8dfe-6522df3ba0fd` settled into turn `01a02745-aa73-7122-8767-efbddb5512e0`; status exited 0 and explicitly named current head `c5c4023`, then ended `outcome: "clean"` without edits, commit, push, or request. |
+| Live defects/fixes | Resumed workspace-write policy had to pass authoritative `cwd` and explicit `<cwd>/.git` (managed policy otherwise blocked `FETCH_HEAD`); invalid marker vocabulary was tightened to `requested`; a linked worktree was replaced with a standalone clone. A clone-local `better-sqlite3` ABI mismatch was rebuilt before final validation. |
+
+Durable daemon evidence is `/private/tmp/wakewire-m5-pr3/logs/wakewire.log`; final-thread
+evidence is `/Users/burkmorrison/.codex/sessions/2026/08/21/rollout-2026-08-21T19-03-08-01a02735-22de-7273-b02f-fda5907c8054.jsonl`.
+
 ## Files likely to change (with paths)
 
 - `src/sources/github/trim.ts`

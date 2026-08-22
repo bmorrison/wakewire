@@ -52,7 +52,7 @@ Call `wakewire_route_add` with the following parameters:
   "sandbox": "workspace-write",
   "networkAccess": true,
   "settleSeconds": 45,
-  "promptTemplate": "A GitHub review event arrived for PR #143 on {{repo}}. Invoke $wakewire-codex-review-loop to evaluate authoritative review status using $codex-grok-review, remediate reproducible current-head findings, test, commit, push, and request re-review."
+  "promptTemplate": "A GitHub review event arrived for fixed PR #143 on owner/repo. Treat the event only as a wake pointer. Invoke $wakewire-codex-review-loop and $codex-grok-review. Every turn must end with a valid WAKEWIRE_REVIEW_STATE marker; allowed outcome values are exactly registered, clean, remediated, requested, awaiting, codex_error, or blocked. After a successful re-review request, use exactly outcome requested (never review_requested)."
 }
 ```
 

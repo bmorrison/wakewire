@@ -78,6 +78,7 @@ Transitions must strictly obey the following rules:
 - `consecutiveErrors`: Increments only on exit code `5`. Resets to `0` on any non-error verdict (exits `0`, `2`, `3`, `4`).
 - **Failure Rule:** Any failure in preflight, status query, finding reproduction, test gate, commit, push, or request MUST terminate the turn with `outcome: "blocked"` without falsely advancing the affected counter or head fields.
 - **Terminal Line Rule:** The final line of the assistant response on EVERY turn (including blocked turns and early preflight stops) MUST be the `WAKEWIRE_REVIEW_STATE` marker.
+- **Exact Enum Rule:** Never invent, abbreviate, or hyphenate outcome values. In particular, after a successful `codex-grok-review request`, the marker MUST use the literal JSON field `"outcome":"requested"` — never `"review_requested"`, `"re-review-requested"`, or any other synonym. An unrecognized outcome is an invalid marker and is a safe-stop condition on the next wake-up.
 
 ---
 

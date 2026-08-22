@@ -2,7 +2,7 @@
 
 This document specifies the concrete, step-by-step verification checklist for Milestone 5 (event-driven Codex review remediation loop).
 
-> **Environment Note:** In this local repository snapshot, external network and GitHub remote mutations (`gh`, `curl`, `ssh`, `git push`) are prohibited by security sandbox policy. Automated test suites validate all components locally with signed fixtures and fake adapters. Full live execution against GitHub is pending supervisor execution in the live environment.
+> **Live evidence (2026-08-21/22 UTC):** A supervised disposable run completed on `bmorrison/wakewire` PR #3 without merging. It used a shared loopback App Server, an attached plain `codex --remote` CLI, signed ingress, and a dedicated standalone clone. The evidence paths are `/private/tmp/wakewire-m5-pr3/logs/wakewire.log` and the target-session transcript named in the plan below. This is execution evidence, not authorization for future PR mutations.
 
 ---
 
@@ -17,15 +17,27 @@ This document specifies the concrete, step-by-step verification checklist for Mi
 - [x] **Daemon Health & MCP Tools:** `wakewire_status` reports `adapter.networkEnabledRoutesSupported` and `adapter.sharedServerConfigured`; MCP schema validates target, sandbox, and settle parameters.
 - [x] **Semantic Skill & State Machine:** `$wakewire-codex-review-loop` runbook enforces `WAKEWIRE_REVIEW_STATE` marker, commit trailers, 5-round cap, 3-error cap, and safe stops.
 
-### Live Supervisor Validation Checklist (Pending Live Execution)
-- [ ] **1. Shared App Server Topology:** Start daemon with `sink.appServerListen: ws://127.0.0.1:<PORT>` and attach interactive CLI via `codex --remote ws://127.0.0.1:<PORT>` in the verified PR-head checkout.
-- [ ] **2. Review Route Registration:** Resolve the PR's authoritative base/head/default-branch metadata, select exactly one existing `<HEAD_REMOTE>` whose normalized fetch and push URLs both match the head repository, then create the route targeting `<CODEX_THREAD_ID>` with `pullRequests: [<PR_NUMBER>]`, `actors: ["chatgpt-codex-connector[bot]"]`, `sandbox: "workspace-write"`, `networkAccess: true`, and `settleSeconds: 45`. Refuse zero/multiple matches; never add/change a remote or assume `origin`.
-- [ ] **3. Ingress Settling & Coalescing Verification:** POST one signed `pull_request_review.submitted` and two `pull_request_review_comment.created` fixtures; verify exactly one settled turn delivers after 45s, newest delivery is carrier, and two earlier rows show `status: "coalesced"`.
-- [ ] **4. Negative Filter & Dedup Verification:** POST fixtures with wrong actor, wrong PR number, and duplicate delivery IDs; verify no additional turn is triggered.
-- [ ] **5. Replay Isolation:** Call `wakewire_replay` on a prior delivery; verify immediate execution without joining the live settle cohort.
-- [ ] **6. In-Flight Resilience & Backoff:** Interrupt App Server / make thread busy; verify delivery goes `held`, preserves retry budget and cohort deadline, and recovers on reconnect.
-- [ ] **7. Exit-2 Remediation Cycle:** Receive real exit-2 review; verify agent fixes reproducible findings, runs test gates, creates normal commit with `WakeWire-Review-*` trailers, pushes once without force, posts `codex-grok-review request <PR_NUMBER>`, emits updated marker, and goes idle without polling.
-- [ ] **8. Exit-0 Clean Verification:** Receive clean review webhook; verify agent evaluates `status` exit 0, makes no edits/commits/pushes/requests, reports clean status to user, and emits terminal marker.
+### Live Supervisor Validation Checklist (Completed on Disposable PR #3)
+- [x] **1. Shared App Server Topology:** Shared `ws://127.0.0.1:4571` App Server with plain attached `codex --remote` CLI and a standalone PR-head clone.
+- [x] **2. Review Route Registration:** One exact PR #3 route, after exact-one head-remote fetch/push URL resolution, targeted the attached thread with bot/PR scope, workspace-write, network access, and a 45-second settle window.
+- [x] **3. Ingress Settling & Coalescing Verification:** Three signed matching fixtures produced one 45-second settled carrier and two coalesced siblings.
+- [x] **4. Negative Filter & Dedup Verification:** Wrong actor, wrong PR, and duplicate delivery fixtures produced no extra model turn or extended settle cohort.
+- [x] **5. Replay Isolation:** A replay was immediate (`isReplay: true`, no settle deadline) and did not join a live cohort.
+- [x] **6. In-Flight Resilience & Backoff:** A matching delivery held across four busy retries (1/2/4/8 seconds), retained its cohort, and delivered once after idle recovery. Its noncanonical read-only harness turn is counted only as queue-resilience evidence.
+- [x] **7. Exit-2 Remediation Cycle:** A real P1 on the faulty disposable head was reproduced, fixed, fully validated, committed with both required trailers, non-force pushed once as `c5c402337cc23c78fc7d38ff3b3759be3df84411`, and re-review was requested once; the final marker was `outcome: "requested"`.
+- [x] **8. Exit-0 Clean Verification:** A signed final issue-comment wake settled and ran one current-head clean turn; `status` exited 0 for `c5c4023`, made no mutation or request, and ended with `outcome: "clean"`.
+
+#### Compact live evidence
+
+| Item | Observed evidence |
+| --- | --- |
+| Topology | Codex CLI `0.149.0`; daemon PID `96795`; shared `ws://127.0.0.1:4571`; standalone clone `/private/tmp/wakewire-pr3-m5-clone`; attached thread `01a02735-22de-7273-b02f-fda5907c8054`. |
+| Exact route | Route `d744c2e2-3e6a-4ece-8e56-9abb4df7ae7e`: PR #3, exact Codex bot actor, workspace-write, network enabled, 45-second settling. The supervisor manually disabled it only after evidence capture; the clean turn did not remove or disable it. |
+| Baseline and repair | Fault baseline `3907df946d431545338907ae76b4d181081c8b85`; real P1 remediation commit `c5c402337cc23c78fc7d38ff3b3759be3df84411` with both `WakeWire-Review-*` trailers. |
+| Queue cases | Initial signed three-event cohort coalesced to carrier `432ef89a-fd1f-4292-a517-6cd5cd6f203a`; duplicate `m5v3-clean-001` was skipped; busy delivery `2cf55b93-1672-4ae4-8adb-f8e4bb921c39` held at 1/2/4/8 seconds then delivered once; clean replay `b5e3baff-e9e7-4d59-8fb0-338e24b7c069` was immediate and outside its settle cohort. Wrong actor and wrong PR fixtures did not create route deliveries. |
+| Remediation | Replay `f26aebc7-27bb-4d1c-8164-31167273458f` ran exit 2, focused tests 4/4 plus full coverage suite 105/105, typecheck, lint, and build; it made one non-force push and one request, ending `outcome: "requested"`. |
+| Final clean | Signed delivery `20b17939-37a4-4a4c-8dfe-6522df3ba0fd` settled into turn `01a02745-aa73-7122-8767-efbddb5512e0`; authoritative status exit 0 named `c5c4023`, and the exact final marker was `outcome: "clean"` with no edit, commit, push, or request. |
+| Live defects corrected | Resumed policy had dropped `cwd`, then needed explicit `<cwd>/.git` for managed Git metadata writes; an invalid marker enum was tightened to `requested`; the failed linked-worktree target was replaced with a standalone clone. A clone-local `better-sqlite3` ABI mismatch was rebuilt before the final successful cycle. |
 
 ---
 
@@ -70,6 +82,8 @@ export API_PORT="4570"
    ```
    Save this value as `THREAD_ID`.
 
+   The review checkout must be a standalone clone with a physical, writable `.git` directory, not a linked worktree. For every resumed `workspace-write` turn, WakeWire derives the App Server sandbox roots only from authoritative `thread/resume.cwd`, granting exactly `<cwd>` and `<cwd>/.git`; this narrow metadata root is required for `git fetch` to update `FETCH_HEAD` under the managed sandbox.
+
 3. Verify authoritative review reader is available:
    ```bash
    codex-grok-review status "${PR_NUMBER}"
@@ -105,7 +119,7 @@ export API_PORT="4570"
      "sandbox": "workspace-write",
      "networkAccess": true,
      "settleSeconds": 45,
-     "promptTemplate": "A GitHub review webhook arrived for PR #${PR_NUMBER} on {{repo}}. Follow the $wakewire-codex-review-loop runbook: run codex-grok-review status ${PR_NUMBER}, address open findings if exit 2, run repo validation, commit, push, request re-review, and emit the WAKEWIRE_REVIEW_STATE marker."
+     "promptTemplate": "A GitHub review webhook arrived for fixed PR #${PR_NUMBER} on ${REPO}. Treat the event only as a wake pointer. Follow the $wakewire-codex-review-loop runbook and codex-grok-review status ${PR_NUMBER}. Every turn must end with a valid WAKEWIRE_REVIEW_STATE marker whose outcome is exactly one of registered, clean, remediated, requested, awaiting, codex_error, or blocked. After a successful re-review request, outcome must be exactly requested (never review_requested)."
    }
    ```
 

@@ -26,6 +26,8 @@ const CLIENT_INFO = { name: "wakewire", title: "WakeWire", version: "0.1.0" };
 
 interface ThreadResumeResponse {
   thread: { id: string; status?: { type: string } };
+  /** The App Server's authoritative checkout for the resumed thread. */
+  cwd: string;
 }
 
 interface TurnItem {
@@ -109,7 +111,15 @@ export class CodexAppServerAdapter implements AgentAdapter {
     if (resumed.thread.status?.type === "active") {
       throw new BusyError(`thread ${threadId} has a turn in flight`);
     }
-    return this.runTurn(rpc, threadId, prompt, opts);
+    if (opts.sandbox === "workspace-write" && !resumed.cwd) {
+      throw new PermanentError(
+        `thread ${threadId} did not report a checkout cwd; refusing workspace-write delivery`,
+      );
+    }
+    // A resumed turn does not otherwise carry its checkout into the sandbox
+    // policy.  Use only the App Server-reported cwd (never route/user prompt
+    // data) so workspace-write can include the thread's own .git metadata.
+    return this.runTurn(rpc, threadId, prompt, { ...opts, cwd: resumed.cwd });
   }
 
   async startThread(prompt: string, opts: DeliveryOptions): Promise<DeliveryResult> {
@@ -372,7 +382,10 @@ export function buildSandboxPolicy(opts: DeliveryOptions) {
   if (opts.sandbox === "workspace-write") {
     return {
       type: "workspaceWrite",
-      writableRoots: opts.cwd ? [opts.cwd] : [],
+      // Codex's managed sandbox treats .git as a more-specific path. Include
+      // the checkout metadata explicitly so a resumed review turn can fetch
+      // and later commit, while deriving both roots only from App Server cwd.
+      writableRoots: opts.cwd ? [opts.cwd, path.join(opts.cwd, ".git")] : [],
       networkAccess: opts.networkAccess,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
