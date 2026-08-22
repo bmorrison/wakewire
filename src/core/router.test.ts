@@ -160,6 +160,37 @@ describe("matchRoutes — github", () => {
       match: { repo: "acme/api", events: ["pull_request_review_comment"] },
     });
     expect(matchRoutes([legacyRoute], matchingEvent)).toHaveLength(1);
+
+    // Actors filter matches ordinary pull_request.opened events with trimmed actor field
+    const prLifecycleRoute = route({
+      match: {
+        repo: "acme/api",
+        events: ["pull_request.opened"],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+    });
+    const prOpenedEvent = githubEvent({
+      kind: "pull_request.opened",
+      payload: {
+        repo: "acme/api",
+        number: 50,
+        author: "some-author",
+        actor: "chatgpt-codex-connector[bot]",
+      },
+    });
+    expect(matchRoutes([prLifecycleRoute], prOpenedEvent)).toHaveLength(1);
+
+    // Rejects pull_request.opened from unauthorized actor
+    const unauthorizedPrEvent = githubEvent({
+      kind: "pull_request.opened",
+      payload: {
+        repo: "acme/api",
+        number: 50,
+        author: "some-author",
+        actor: "human-contributor",
+      },
+    });
+    expect(matchRoutes([prLifecycleRoute], unauthorizedPrEvent)).toHaveLength(0);
   });
 });
 

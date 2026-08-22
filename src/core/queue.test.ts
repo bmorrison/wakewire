@@ -485,6 +485,58 @@ describe("DeliveryQueue", () => {
       expect(stores.deliveries.get(d1?.id ?? "")?.status).toBe("coalesced");
     });
 
+    it("preserves prior digest members when recoalescing retries (A + B settled -> held B -> + C settled into C)", async () => {
+      // Step 1: Events A and B arrive within settle window
+      const dA = queue.enqueueEvent(settleRoute, makeEvent("event-A"));
+      now = new Date(now.getTime() + 10_000);
+      const dB = queue.enqueueEvent(settleRoute, makeEvent("event-B"));
+
+      // Step 2: Settle window expires for batch [A, B] -> B is carrier, A coalesces into B, but B fails with BusyError
+      adapter.failWith = new BusyError("busy");
+      adapter.failTimes = 1;
+      now = new Date(now.getTime() + 45_000);
+      await queue.tick();
+
+      expect(stores.deliveries.get(dA?.id ?? "")?.status).toBe("coalesced");
+      expect(stores.deliveries.get(dA?.id ?? "")?.coalescedInto).toBe(dB?.id);
+      const heldB = stores.deliveries.get(dB?.id ?? "");
+      expect(heldB?.status).toBe("held");
+      expect(heldB?.attemptCount).toBe(1);
+
+      // Step 3: Event C arrives while B is held
+      now = new Date(now.getTime() + 5_000);
+      const dC = queue.enqueueEvent(settleRoute, makeEvent("event-C"));
+      const newDeadline = stores.deliveries.get(dC?.id ?? "")?.nextAttemptAt;
+      expect(newDeadline).not.toBeNull();
+      expect(stores.deliveries.get(dB?.id ?? "")?.nextAttemptAt).toBe(newDeadline);
+
+      // Step 4: Settle window expires for recoalesced batch -> C is new carrier
+      adapter.failWith = null;
+      now = new Date(new Date(newDeadline ?? "").getTime());
+      await queue.tick();
+
+      // Verify delivery statuses and tree in SQLite
+      const finalC = stores.deliveries.get(dC?.id ?? "");
+      expect(finalC?.status).toBe("delivered");
+      expect(finalC?.attemptCount).toBeGreaterThanOrEqual(1);
+
+      const finalB = stores.deliveries.get(dB?.id ?? "");
+      expect(finalB?.status).toBe("coalesced");
+      expect(finalB?.coalescedInto).toBe(dC?.id);
+
+      const finalA = stores.deliveries.get(dA?.id ?? "");
+      expect(finalA?.status).toBe("coalesced");
+      expect(finalA?.coalescedInto).toBe(dC?.id);
+
+      // Verify the eventual delivered prompt contains all three events (A, B, C)
+      const lastCall = adapter.calls[adapter.calls.length - 1];
+      expect(lastCall?.prompt).toContain("3 github events coalesced");
+      expect(lastCall?.prompt).toContain("event-A");
+      expect(lastCall?.prompt).toContain("event-B");
+      expect(lastCall?.prompt).toContain("event-C");
+      expect(lastCall?.prompt).toContain("settle window");
+    });
+
     it("separate routes maintain independent quiet deadlines", async () => {
       const routeA = stores.routes.create(
         routeInput({

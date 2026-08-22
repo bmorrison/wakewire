@@ -214,10 +214,12 @@ export class DeliveryQueue {
     reason: "rate limit" | "settle window",
   ): Delivery {
     const carrier = all[all.length - 1] as Delivery;
-    const rest = all.slice(0, -1);
-    const events = all.map((d) => d.event);
+    const directIds = all.map((d) => d.id);
+    const fullCohort = this.stores.deliveries.listCoalescedTree(directIds);
+    const events = fullCohort.map((d) => d.event);
+    const restIds = fullCohort.map((d) => d.id).filter((id) => id !== carrier.id);
 
-    const maxAttempts = Math.max(...all.map((d) => d.attemptCount));
+    const maxAttempts = Math.max(...fullCohort.map((d) => d.attemptCount));
     if (maxAttempts > carrier.attemptCount) {
       this.stores.deliveries.updateAttemptCount(carrier.id, maxAttempts);
       carrier.attemptCount = maxAttempts;
@@ -239,12 +241,9 @@ export class DeliveryQueue {
     });
     this.stores.deliveries.updatePrompt(carrier.id, digest);
     carrier.renderedPrompt = digest;
-    this.stores.deliveries.markCoalesced(
-      rest.map((d) => d.id),
-      carrier.id,
-    );
+    this.stores.deliveries.markCoalesced(restIds, carrier.id);
     this.logger.info(
-      { route: route.name, coalesced: rest.length + 1, reason },
+      { route: route.name, coalesced: restIds.length + 1, reason },
       reason === "settle window"
         ? "settle window complete — coalesced deliveries into a digest turn"
         : "rate limit exceeded — coalesced deliveries into a digest turn",

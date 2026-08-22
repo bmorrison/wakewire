@@ -356,6 +356,27 @@ export class DeliveryStore {
     run();
   }
 
+  /**
+   * Return all deliveries in the given set along with all deliveries recursively
+   * coalesced into any of them, in deterministic arrival order (received_at ASC, rowid ASC).
+   */
+  listCoalescedTree(ids: string[]): Delivery[] {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `WITH RECURSIVE ancestry(id) AS (
+           SELECT id FROM deliveries WHERE id IN (${placeholders})
+           UNION
+           SELECT d.id FROM deliveries d JOIN ancestry a ON d.coalesced_into = a.id
+         )
+         SELECT * FROM deliveries WHERE id IN (SELECT id FROM ancestry)
+         ORDER BY received_at ASC, rowid ASC`,
+      )
+      .all(...ids) as DeliveryRow[];
+    return rows.map(toDelivery);
+  }
+
   /** Count deliveries attempted for a route within the trailing window (rate limiting). */
   countRecentAttempts(routeId: string, sinceIso: string): number {
     const row = this.db

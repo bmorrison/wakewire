@@ -117,6 +117,7 @@ function trimPullRequest(args: {
     typeof payload.number === "number" ? payload.number : (pr.number as number | undefined);
   const title = typeof pr.title === "string" ? truncate(pr.title, 200) : "";
   const author = isRecord(pr.user) && typeof pr.user.login === "string" ? pr.user.login : "unknown";
+  const actor = resolveActor(payload, pr);
   const url = typeof pr.html_url === "string" ? pr.html_url : "";
   const headBranch = isRecord(pr.head) && typeof pr.head.ref === "string" ? pr.head.ref : "";
   const headSha = isRecord(pr.head) && typeof pr.head.sha === "string" ? pr.head.sha : "";
@@ -133,6 +134,7 @@ function trimPullRequest(args: {
       number: number ?? null,
       title,
       author,
+      actor,
       url,
       branch: headBranch,
       baseBranch,

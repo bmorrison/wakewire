@@ -104,9 +104,48 @@ describe("trimGithubEvent — pull_request / issues / fallback", () => {
     expect(event?.payload).toMatchObject({
       number: 42,
       author: "glenn",
+      actor: "glenn",
       branch: "feat/x",
       baseBranch: "main",
     });
+  });
+
+  it("trims pull_request events preferring sender login as actor and preserving author", () => {
+    const event = trimGithubEvent({
+      eventName: "pull_request",
+      deliveryId: "d-3b",
+      payload: {
+        action: "opened",
+        number: 43,
+        repository: { full_name: "acme/api" },
+        sender: { login: "chatgpt-codex-connector[bot]" },
+        pull_request: {
+          title: "Automated PR",
+          body: "b".repeat(2000),
+          html_url: "https://github.com/acme/api/pull/43",
+          user: { login: "codex-author" },
+          head: { ref: "feat/auto", sha: "sha-head-43" },
+          base: { ref: "main" },
+        },
+      },
+    });
+    if (!event) throw new Error("Expected a trimmed pull_request event");
+    expect(event.kind).toBe("pull_request.opened");
+    expect(event.payload).toMatchObject({
+      repo: "acme/api",
+      action: "opened",
+      number: 43,
+      title: "Automated PR",
+      author: "codex-author",
+      actor: "chatgpt-codex-connector[bot]",
+      branch: "feat/auto",
+      baseBranch: "main",
+      headSha: "sha-head-43",
+    });
+    expect((event.payload.body as string).length).toBeLessThanOrEqual(
+      1000 + "… [truncated]".length,
+    );
+    expect(event.payload.body as string).toContain("[truncated]");
   });
 
   it("trims issues events", () => {
