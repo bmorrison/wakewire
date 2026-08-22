@@ -46,5 +46,5 @@ Paste into the target thread:
 
 - **Detailed Source Setup:** See [docs/setup.md](setup.md) for full Gmail, Slack, and generic webhook instructions.
 - **Event-Driven Codex Review Remediation:** See [recipes/codex-review-loop.md](../recipes/codex-review-loop.md) and `$wakewire-codex-review-loop` to automatically remediate Codex Code Review findings on pull requests.
-- **Webhook Recipes:** See [recipes/](recipes/) for ready-to-use Linear, Sentry, and ClickUp recipes.
+- **Webhook Recipes:** See [recipes/](../recipes/) for ready-to-use Linear, Sentry, and ClickUp recipes.
 - **Triage & Troubleshooting:** See `$wakewire-inspect` to triage deliveries and inspect error messages.
