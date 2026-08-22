@@ -5,14 +5,11 @@ Wake an attached Codex CLI session on OpenAI Codex Code Review webhook events, a
 ## Prerequisites
 
 1. **Shared App Server Mode**:
-   WakeWire daemon configured with loopback App Server listen URL in `~/.wakewire/daemon.json`:
-   ```json
-   {
-     "sink": {
-       "adapter": "codex-app-server",
-       "appServerListen": "ws://127.0.0.1:4571"
-     }
-   }
+   Configure WakeWire to use the `codex-app-server` adapter with the shared loopback WebSocket listener (loopback `127.0.0.1` required for security):
+   ```bash
+   wakewire config set sink.adapter codex-app-server
+   wakewire config set sink.appServerListen ws://127.0.0.1:4571
+   wakewire stop && wakewire start --detach
    ```
 2. **Attached Session**:
    Open a terminal in the target repository checkout on the target PR branch:

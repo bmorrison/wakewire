@@ -143,7 +143,7 @@ Sign each payload with HMAC-SHA256 using `${SECRET}` and POST to `http://127.0.0
    - `codex-grok-review status ${PR_NUMBER}` returns exit `2`.
    - `codex-grok-review detail ${PR_NUMBER}` lists open findings.
    - Code edits applied to working tree.
-   - Repository gates pass (`npm run typecheck`, `npm test`, `npm run lint`, `npm run build`).
+   - Repository validation gates pass (focused validation plus full required gates prescribed by the repository's toolchain, e.g. typecheck, test, lint, build).
    - Normal commit created with trailers:
      ```text
      WakeWire-Review-PR: ${REPO}#${PR_NUMBER}
