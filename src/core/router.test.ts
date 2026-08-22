@@ -13,6 +13,8 @@ function route(overrides: Partial<Route>): Route {
     promptTemplate: null,
     sandbox: "read-only",
     rateLimitPerMinute: null,
+    settleSeconds: null,
+    networkAccess: false,
     enabled: true,
     createdAt: "2026-07-03T00:00:00.000Z",
     ...overrides,
@@ -87,6 +89,108 @@ describe("matchRoutes — github", () => {
         githubEvent({ kind: "issues.opened", payload: { repo: "acme/api" } }),
       ),
     ).toHaveLength(1);
+  });
+
+  it("applies pullRequests and actors filters to GitHub review events", () => {
+    const reviewRoute = route({
+      match: {
+        repo: "acme/api",
+        events: ["pull_request_review_comment"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+    });
+
+    const matchingEvent = githubEvent({
+      kind: "pull_request_review_comment.created",
+      payload: {
+        repo: "acme/api",
+        number: 143,
+        actor: "ChatGPT-Codex-Connector[bot]",
+      },
+    });
+
+    // Exact case-insensitive actor and exact PR number matches
+    expect(matchRoutes([reviewRoute], matchingEvent)).toHaveLength(1);
+
+    // Wrong PR number
+    expect(
+      matchRoutes(
+        [reviewRoute],
+        githubEvent({
+          kind: "pull_request_review_comment.created",
+          payload: { repo: "acme/api", number: 144, actor: "chatgpt-codex-connector[bot]" },
+        }),
+      ),
+    ).toHaveLength(0);
+
+    // Substring actor must not match
+    expect(
+      matchRoutes(
+        [reviewRoute],
+        githubEvent({
+          kind: "pull_request_review_comment.created",
+          payload: { repo: "acme/api", number: 143, actor: "chatgpt-codex-connector" },
+        }),
+      ),
+    ).toHaveLength(0);
+
+    // Missing PR number or actor fails closed when filter is configured
+    expect(
+      matchRoutes(
+        [reviewRoute],
+        githubEvent({
+          kind: "pull_request_review_comment.created",
+          payload: { repo: "acme/api", actor: "chatgpt-codex-connector[bot]" },
+        }),
+      ),
+    ).toHaveLength(0);
+    expect(
+      matchRoutes(
+        [reviewRoute],
+        githubEvent({
+          kind: "pull_request_review_comment.created",
+          payload: { repo: "acme/api", number: 143 },
+        }),
+      ),
+    ).toHaveLength(0);
+
+    // Legacy route without PR or actor filters accepts the review event
+    const legacyRoute = route({
+      match: { repo: "acme/api", events: ["pull_request_review_comment"] },
+    });
+    expect(matchRoutes([legacyRoute], matchingEvent)).toHaveLength(1);
+
+    // Actors filter matches ordinary pull_request.opened events with trimmed actor field
+    const prLifecycleRoute = route({
+      match: {
+        repo: "acme/api",
+        events: ["pull_request.opened"],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+    });
+    const prOpenedEvent = githubEvent({
+      kind: "pull_request.opened",
+      payload: {
+        repo: "acme/api",
+        number: 50,
+        author: "some-author",
+        actor: "chatgpt-codex-connector[bot]",
+      },
+    });
+    expect(matchRoutes([prLifecycleRoute], prOpenedEvent)).toHaveLength(1);
+
+    // Rejects pull_request.opened from unauthorized actor
+    const unauthorizedPrEvent = githubEvent({
+      kind: "pull_request.opened",
+      payload: {
+        repo: "acme/api",
+        number: 50,
+        author: "some-author",
+        actor: "human-contributor",
+      },
+    });
+    expect(matchRoutes([prLifecycleRoute], unauthorizedPrEvent)).toHaveLength(0);
   });
 });
 

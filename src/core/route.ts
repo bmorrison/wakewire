@@ -11,6 +11,10 @@ export const GithubMatchSchema = z.object({
   events: z.array(z.string().min(1)).min(1).default(["push"]),
   /** For push events: only these branches. Omit for all branches. */
   branches: z.array(z.string().min(1)).optional(),
+  /** For PR events: match only these PR numbers. */
+  pullRequests: z.array(z.number().int().positive()).min(1).optional(),
+  /** For PR/review events: match only these sender logins (exact, case-insensitive). */
+  actors: z.array(z.string().min(1)).min(1).optional(),
 });
 
 export const SlackMatchSchema = z
@@ -117,6 +121,10 @@ export const RouteInputSchema = z
     sandbox: SandboxPolicySchema.default("read-only"),
     /** Deliveries per minute before coalescing into a digest. Omit to use the daemon default (10). */
     rateLimitPerMinute: z.number().int().positive().max(600).optional(),
+    /** Trailing-edge quiet window (in seconds) before delivering a batch. Omit for immediate delivery. */
+    settleSeconds: z.number().int().min(1).max(3600).optional(),
+    /** Explicit unattended network access grant (github + workspace-write only). */
+    networkAccess: z.boolean().default(false),
     enabled: z.boolean().default(true),
   })
   .superRefine((route, ctx) => {
@@ -131,6 +139,13 @@ export const RouteInputSchema = z
         code: "custom",
         path: ["sandbox"],
         message: "gmail routes are forced to read-only sandbox",
+      });
+    }
+    if (route.networkAccess && (route.source !== "github" || route.sandbox !== "workspace-write")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["networkAccess"],
+        message: "networkAccess is only allowed on github workspace-write routes",
       });
     }
   })
@@ -156,6 +171,7 @@ export type WebhookMatch = z.infer<typeof WebhookMatchSchema>;
 export type RouteTarget = z.infer<typeof RouteTargetSchema>;
 export type SandboxPolicy = z.infer<typeof SandboxPolicySchema>;
 export type RouteInput = z.infer<typeof RouteInputSchema>;
+export type RouteInputRaw = z.input<typeof RouteInputSchema>;
 
 export interface Route {
   id: string;
@@ -167,6 +183,8 @@ export interface Route {
   sandbox: SandboxPolicy;
   /** null = use the daemon-wide default. */
   rateLimitPerMinute: number | null;
+  settleSeconds: number | null;
+  networkAccess: boolean;
   enabled: boolean;
   createdAt: string;
 }

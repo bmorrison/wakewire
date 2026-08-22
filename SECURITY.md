@@ -115,12 +115,23 @@ enabling `workspace-write` on anything.
 
 - Sandbox: `read-only` unless a github route explicitly opts into
   `workspace-write` (which also disables network access for the turn under the
-  app-server adapter's policy object).
+  app-server adapter's policy object unless `networkAccess: true` is explicitly granted).
 - Gmail: a label is required; you cannot watch a whole inbox.
 - Rate limit: 10 deliveries/minute per route, then coalescing into digest turns —
   a hostile webhook flood becomes one summarizing turn, not a hundred agent runs.
+- Trailing-edge settle windows (`settleSeconds`) coalesce multi-comment review bursts into a single calm turn after the reviewer finishes commenting.
 - wakewire never reads or writes Codex's internal SQLite state; it only uses
   documented CLI/SDK/app-server surfaces.
+
+## GitHub Review Remediation Loop Security Model
+
+The unattended Codex review remediation loop pairs event-driven wakeups with write and network access:
+
+- **Signed Ingress as a Trigger Boundary**: GitHub HMAC verification (`X-Hub-Signature-256`) and exact scoping (`pullRequests`, `actors: ["chatgpt-codex-connector[bot]"]`) ensure that only authentic review events wake the agent. However, webhook body content remains an untrusted pointer; review state is always re-fetched via the authoritative `codex-grok-review` tool.
+- **Explicit Network & Write Grant**: Outbound network access (`networkAccess: true`) is default-off, supported exclusively on the `codex-app-server` adapter, and permitted only on GitHub routes with `workspace-write`. Network access is broad egress (as supported by Codex sandboxing) rather than domain-restricted allowlisting; users must explicitly authorize this grant during setup.
+- **Authoritative Checkout Scope**: For a resumed workspace-write turn, WakeWire derives writable roots only from the App Server's `thread/resume.cwd`: exactly the checkout and its `<cwd>/.git` metadata directory. The latter is needed because Codex's managed sandbox treats Git metadata as a more-specific path; it is not permission to write a parent directory or another checkout. The live remediation topology requires a standalone clone with a physical writable `.git` directory; linked worktrees whose metadata redirects outside the checkout are unsupported.
+- **Minimal Safe Topology**: The only supported deployment topology is one dedicated, attached Codex CLI session (`codex --remote`) per active PR checkout. Running unattended review remediation loops across shared or dirty worktrees is unsupported.
+- **Hard Prohibitions**: Remediation loops operate under strict constraints: never write to default branches (e.g. `main`), never force-push, never rebase, never merge, and never delete branches or dismiss review comments. Commits are tracked with `WakeWire-Review-PR` and `WakeWire-Review-Round` trailers.
 
 ## Reporting
 

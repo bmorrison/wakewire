@@ -118,12 +118,27 @@ describe("DeliveryQueue", () => {
     const call = adapter.calls[0];
     expect(call?.threadId).toBe("thread-1");
     expect(call?.opts.sandbox).toBe("read-only");
+    expect(call?.opts.networkAccess).toBe(false);
     expect(call?.prompt).toContain("UNTRUSTED EVENT DATA");
 
     const stored = stores.deliveries.get(delivery?.id ?? "");
     expect(stored?.status).toBe("delivered");
     expect(stored?.threadId).toBe("thread-1");
     expect(stored?.turnId).toBe("turn-1");
+  });
+
+  it("passes networkAccess: true to adapter DeliveryOptions for enabled routes", async () => {
+    const netRoute = stores.routes.create(
+      routeInput({
+        name: "net",
+        sandbox: "workspace-write",
+        networkAccess: true,
+      }),
+    );
+    queue.enqueueEvent(netRoute, makeEvent("d-net"));
+    await queue.tick();
+    expect(adapter.calls[0]?.opts.networkAccess).toBe(true);
+    expect(adapter.calls[0]?.opts.sandbox).toBe("workspace-write");
   });
 
   it("dedups by source delivery id and records the skip", async () => {
@@ -318,6 +333,263 @@ describe("DeliveryQueue", () => {
     await queue.tick();
     expect(adapter.calls).toHaveLength(0);
     expect(stores.deliveries.get(delivery?.id ?? "")?.status).toBe("queued");
+  });
+
+  describe("trailing-edge settling (settleSeconds)", () => {
+    let settleRoute: Route;
+
+    beforeEach(() => {
+      settleRoute = stores.routes.create(
+        routeInput({
+          name: "settle review",
+          settleSeconds: 45,
+          sandbox: "workspace-write",
+        }),
+      );
+    });
+
+    it("one event produces no adapter call at 44.999s and one normal event turn at 45s", async () => {
+      const delivery = queue.enqueueEvent(settleRoute, makeEvent("s-1"));
+      expect(delivery).not.toBeNull();
+      expect(delivery?.status).toBe("queued");
+      expect(delivery?.nextAttemptAt).toBe(new Date(now.getTime() + 45_000).toISOString());
+
+      // At 44.999s, nothing is ready
+      now = new Date(now.getTime() + 44_999);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(0);
+
+      // At 45s, delivered as normal event (not digest)
+      now = new Date(now.getTime() + 1);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(1);
+      expect(adapter.calls[0]?.prompt).toContain("[wakewire event]");
+      expect(adapter.calls[0]?.prompt).not.toContain("[wakewire digest]");
+      expect(stores.deliveries.get(delivery?.id ?? "")?.status).toBe("delivered");
+    });
+
+    it("burst of events moves the whole batch deadline to 45s after the newest event", async () => {
+      const d1 = queue.enqueueEvent(settleRoute, makeEvent("s-1"));
+      // 10s later, second event arrives
+      now = new Date(now.getTime() + 10_000);
+      const d2 = queue.enqueueEvent(settleRoute, makeEvent("s-2"));
+      // 10s later (20s total), third event arrives
+      now = new Date(now.getTime() + 10_000);
+      const d3 = queue.enqueueEvent(settleRoute, makeEvent("s-3"));
+
+      // All 3 deliveries now have deadline at now + 45s (i.e. T0 + 65s)
+      const expectedDeadline = new Date(now.getTime() + 45_000).toISOString();
+      expect(stores.deliveries.get(d1?.id ?? "")?.nextAttemptAt).toBe(expectedDeadline);
+      expect(stores.deliveries.get(d2?.id ?? "")?.nextAttemptAt).toBe(expectedDeadline);
+      expect(stores.deliveries.get(d3?.id ?? "")?.nextAttemptAt).toBe(expectedDeadline);
+
+      // Advance to T0 + 64.999s -> no turn
+      now = new Date(now.getTime() + 44_999);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(0);
+
+      // Advance to T0 + 65s -> exactly one adapter call
+      now = new Date(now.getTime() + 1);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(1);
+
+      // Newest delivery (d3) is carrier; d1 and d2 are coalesced into d3
+      const carrier = stores.deliveries.get(d3?.id ?? "");
+      expect(carrier?.status).toBe("delivered");
+      const c1 = stores.deliveries.get(d1?.id ?? "");
+      const c2 = stores.deliveries.get(d2?.id ?? "");
+      expect(c1?.status).toBe("coalesced");
+      expect(c1?.coalescedInto).toBe(d3?.id);
+      expect(c2?.status).toBe("coalesced");
+      expect(c2?.coalescedInto).toBe(d3?.id);
+
+      // Digest header indicates settle window
+      expect(adapter.calls[0]?.prompt).toContain("3 github events coalesced (settle window)");
+    });
+
+    it("duplicate delivery remains skipped-duplicate, does not extend deadline, does not produce extra turn", async () => {
+      const d1 = queue.enqueueEvent(settleRoute, makeEvent("s-1"));
+      const originalDeadline = stores.deliveries.get(d1?.id ?? "")?.nextAttemptAt;
+
+      // 10s later duplicate s-1 arrives
+      now = new Date(now.getTime() + 10_000);
+      const dup = queue.enqueueEvent(settleRoute, makeEvent("s-1"));
+      expect(dup).toBeNull();
+
+      // Deadline must not have moved
+      expect(stores.deliveries.get(d1?.id ?? "")?.nextAttemptAt).toBe(originalDeadline);
+
+      // Advance to original 45s deadline
+      now = new Date(now.getTime() + 35_000);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(1);
+    });
+
+    it("replay bypasses settling and is excluded from live settle cohort", async () => {
+      // Live delivery waiting in settle window
+      const dLive = queue.enqueueEvent(settleRoute, makeEvent("live-1"));
+
+      // Past delivery on settle route that was previously delivered
+      const past = stores.deliveries.enqueue({
+        routeId: settleRoute.id,
+        event: makeEvent("past-1"),
+        renderedPrompt: "prompt",
+        isReplay: false,
+      });
+      stores.deliveries.markDelivered(past?.id ?? "", { threadId: "thread-1" });
+
+      // Replay it
+      const replayed = queue.replay(past?.id ?? "");
+      expect(replayed.isReplay).toBe(true);
+      expect(replayed.nextAttemptAt).toBeNull();
+
+      // Tick immediately delivers replay while live delivery is still waiting
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(1);
+      expect(stores.deliveries.get(replayed.id)?.status).toBe("delivered");
+      expect(stores.deliveries.get(dLive?.id ?? "")?.status).toBe("queued");
+    });
+
+    it("settled carrier held by BusyError joins new events in one cohort and preserves backoff/attempt budget", async () => {
+      // First event arrives and settles
+      adapter.failWith = new BusyError("busy");
+      adapter.failTimes = 1;
+      const d1 = queue.enqueueEvent(settleRoute, makeEvent("s-1"));
+      now = new Date(now.getTime() + 45_000);
+      await queue.tick();
+
+      const held1 = stores.deliveries.get(d1?.id ?? "");
+      expect(held1?.status).toBe("held");
+      expect(held1?.attemptCount).toBe(1);
+      const backoffDeadline = held1?.nextAttemptAt;
+      expect(backoffDeadline).not.toBeNull();
+
+      // New event arrives while d1 is held
+      const d2 = queue.enqueueEvent(settleRoute, makeEvent("s-2"));
+      // Cohort deadline must be max(new settle deadline, existing backoff deadline)
+      const expectedDeadline =
+        new Date(now.getTime() + 45_000).toISOString() > (backoffDeadline ?? "")
+          ? new Date(now.getTime() + 45_000).toISOString()
+          : backoffDeadline;
+      expect(stores.deliveries.get(d1?.id ?? "")?.nextAttemptAt).toBe(expectedDeadline);
+      expect(stores.deliveries.get(d2?.id ?? "")?.nextAttemptAt).toBe(expectedDeadline);
+
+      // After deadline, delivers once and carries forward attemptCount
+      adapter.failWith = null;
+      now = new Date(new Date(expectedDeadline ?? "").getTime());
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(2); // 1 failed + 1 successful
+      const carrier = stores.deliveries.get(d2?.id ?? "");
+      expect(carrier?.status).toBe("delivered");
+      expect(carrier?.attemptCount).toBeGreaterThanOrEqual(1);
+      expect(stores.deliveries.get(d1?.id ?? "")?.status).toBe("coalesced");
+    });
+
+    it("preserves prior digest members when recoalescing retries (A + B settled -> held B -> + C settled into C)", async () => {
+      // Step 1: Events A and B arrive within settle window
+      const dA = queue.enqueueEvent(settleRoute, makeEvent("event-A"));
+      now = new Date(now.getTime() + 10_000);
+      const dB = queue.enqueueEvent(settleRoute, makeEvent("event-B"));
+
+      // Step 2: Settle window expires for batch [A, B] -> B is carrier, A coalesces into B, but B fails with BusyError
+      adapter.failWith = new BusyError("busy");
+      adapter.failTimes = 1;
+      now = new Date(now.getTime() + 45_000);
+      await queue.tick();
+
+      expect(stores.deliveries.get(dA?.id ?? "")?.status).toBe("coalesced");
+      expect(stores.deliveries.get(dA?.id ?? "")?.coalescedInto).toBe(dB?.id);
+      const heldB = stores.deliveries.get(dB?.id ?? "");
+      expect(heldB?.status).toBe("held");
+      expect(heldB?.attemptCount).toBe(1);
+
+      // Step 3: Event C arrives while B is held
+      now = new Date(now.getTime() + 5_000);
+      const dC = queue.enqueueEvent(settleRoute, makeEvent("event-C"));
+      const newDeadline = stores.deliveries.get(dC?.id ?? "")?.nextAttemptAt;
+      expect(newDeadline).not.toBeNull();
+      expect(stores.deliveries.get(dB?.id ?? "")?.nextAttemptAt).toBe(newDeadline);
+
+      // Step 4: Settle window expires for recoalesced batch -> C is new carrier
+      adapter.failWith = null;
+      now = new Date(new Date(newDeadline ?? "").getTime());
+      await queue.tick();
+
+      // Verify delivery statuses and tree in SQLite
+      const finalC = stores.deliveries.get(dC?.id ?? "");
+      expect(finalC?.status).toBe("delivered");
+      expect(finalC?.attemptCount).toBeGreaterThanOrEqual(1);
+
+      const finalB = stores.deliveries.get(dB?.id ?? "");
+      expect(finalB?.status).toBe("coalesced");
+      expect(finalB?.coalescedInto).toBe(dC?.id);
+
+      const finalA = stores.deliveries.get(dA?.id ?? "");
+      expect(finalA?.status).toBe("coalesced");
+      expect(finalA?.coalescedInto).toBe(dC?.id);
+
+      // Verify the eventual delivered prompt contains all three events (A, B, C)
+      const lastCall = adapter.calls[adapter.calls.length - 1];
+      expect(lastCall?.prompt).toContain("3 github events coalesced");
+      expect(lastCall?.prompt).toContain("event-A");
+      expect(lastCall?.prompt).toContain("event-B");
+      expect(lastCall?.prompt).toContain("event-C");
+      expect(lastCall?.prompt).toContain("settle window");
+    });
+
+    it("separate routes maintain independent quiet deadlines", async () => {
+      const routeA = stores.routes.create(
+        routeInput({
+          name: "route A",
+          settleSeconds: 45,
+          target: { type: "thread", threadId: "t-A" },
+        }),
+      );
+      const routeB = stores.routes.create(
+        routeInput({
+          name: "route B",
+          settleSeconds: 45,
+          target: { type: "thread", threadId: "t-B" },
+        }),
+      );
+
+      queue.enqueueEvent(routeA, makeEvent("a-1"));
+      now = new Date(now.getTime() + 20_000);
+      queue.enqueueEvent(routeB, makeEvent("b-1"));
+
+      // At T0 + 45s: routeA delivers, routeB has 20s remaining
+      now = new Date(now.getTime() + 25_000);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(1);
+      expect(adapter.calls[0]?.threadId).toBe("t-A");
+
+      // At T0 + 65s: routeB delivers
+      now = new Date(now.getTime() + 20_000);
+      await queue.tick();
+      expect(adapter.calls).toHaveLength(2);
+      expect(adapter.calls[1]?.threadId).toBe("t-B");
+    });
+
+    it("closing/reopening database before deadline preserves next_attempt_at and delivers once", async () => {
+      const dbPath = openDatabase(":memory:");
+      const s = createStores(dbPath);
+      const r = s.routes.create(routeInput({ name: "persist settle", settleSeconds: 45 }));
+      const q1 = new DeliveryQueue(s, adapter, logger, { now: () => now, autoWake: false });
+      const d = q1.enqueueEvent(r, makeEvent("p-1"));
+
+      const deadline = s.deliveries.get(d?.id ?? "")?.nextAttemptAt;
+      expect(deadline).not.toBeNull();
+
+      // Create new queue instance on same stores (simulating restart)
+      const q2 = new DeliveryQueue(s, adapter, logger, { now: () => now, autoWake: false });
+      expect(s.deliveries.get(d?.id ?? "")?.nextAttemptAt).toBe(deadline);
+
+      // Advance clock and tick
+      now = new Date(now.getTime() + 45_000);
+      await q2.tick();
+      expect(adapter.calls).toHaveLength(1);
+      expect(s.deliveries.get(d?.id ?? "")?.status).toBe("delivered");
+    });
   });
 });
 

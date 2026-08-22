@@ -93,4 +93,19 @@ describe("buildDigestPrompt", () => {
     expect(prompt).toContain('"n": 3');
     expect(prompt).not.toContain('"n": 1,');
   });
+
+  it("supports settle window as the coalescing reason", () => {
+    const events = [
+      event({ repo: "acme/api", action: "submitted" }),
+      event({ repo: "acme/api", action: "created" }),
+    ];
+    const prompt = buildDigestPrompt({
+      routeName: "codex loop",
+      source: "github",
+      instructions: "Review PR.",
+      events,
+      reason: "settle window",
+    });
+    expect(prompt).toContain("2 github events coalesced (settle window)");
+  });
 });

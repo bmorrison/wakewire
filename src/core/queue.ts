@@ -1,6 +1,6 @@
 import type { Delivery, Stores } from "../db/repos.js";
 import type { Logger } from "../logging.js";
-import type { AgentAdapter } from "../sinks/types.js";
+import type { AgentAdapter, DeliveryOptions } from "../sinks/types.js";
 import { BusyError, PermanentError, UnreachableError } from "../sinks/types.js";
 import { buildDigestPrompt, buildPrompt } from "./envelope.js";
 import type { WakeEvent } from "./event.js";
@@ -73,6 +73,14 @@ export class DeliveryQueue {
   /** Render the prompt for a matched event and persist it as a queued delivery. */
   enqueueEvent(route: Route, event: WakeEvent, opts: { isReplay?: boolean } = {}): Delivery | null {
     let prompt: string;
+    const currentTime = this.now();
+    const receivedAt = currentTime.toISOString();
+    const isReplay = opts.isReplay ?? false;
+    const nextAttemptAt =
+      !isReplay && route.settleSeconds
+        ? new Date(currentTime.getTime() + route.settleSeconds * 1000).toISOString()
+        : null;
+
     try {
       prompt = this.renderPrompt(route, event);
     } catch (err) {
@@ -81,7 +89,9 @@ export class DeliveryQueue {
           routeId: route.id,
           event,
           renderedPrompt: "",
-          isReplay: opts.isReplay ?? false,
+          isReplay,
+          receivedAt,
+          nextAttemptAt,
         });
         if (delivery)
           this.stores.deliveries.markFailed(delivery.id, `template error: ${err.message}`);
@@ -94,7 +104,9 @@ export class DeliveryQueue {
       routeId: route.id,
       event,
       renderedPrompt: prompt,
-      isReplay: opts.isReplay ?? false,
+      isReplay,
+      receivedAt,
+      nextAttemptAt,
     });
     if (delivery === null) {
       this.logger.info(
@@ -168,21 +180,51 @@ export class DeliveryQueue {
   }
 
   /**
-   * Rate limiting: when a route exceeds its per-minute budget and several
-   * deliveries are waiting for the same thread, merge them into one digest
-   * turn carried by the newest delivery.
+   * Settle window and rate limiting coalescing: merge sibling deliveries waiting
+   * for the same route into one digest turn carried by the newest delivery.
    */
   private maybeCoalesce(route: Route, delivery: Delivery, ready: Delivery[]): Delivery {
+    if (delivery.isReplay) return delivery;
+
+    // 1. Settle window coalescing
+    if (route.settleSeconds) {
+      const siblings = ready.filter(
+        (d) => d.routeId === route.id && !d.isReplay && d.id !== delivery.id,
+      );
+      if (siblings.length === 0) return delivery;
+
+      return this.coalesceBatch(route, [delivery, ...siblings], "settle window");
+    }
+
+    // 2. Rate limiting coalescing
     const limit = route.rateLimitPerMinute ?? this.ratePerMinute;
     const windowStart = new Date(this.now().getTime() - 60_000).toISOString();
     const recent = this.stores.deliveries.countRecentAttempts(route.id, windowStart);
-    const siblings = ready.filter((d) => d.routeId === route.id && d.id !== delivery.id);
+    const siblings = ready.filter(
+      (d) => d.routeId === route.id && !d.isReplay && d.id !== delivery.id,
+    );
     if (recent < limit || siblings.length === 0) return delivery;
 
-    const all = [delivery, ...siblings];
+    return this.coalesceBatch(route, [delivery, ...siblings], "rate limit");
+  }
+
+  private coalesceBatch(
+    route: Route,
+    all: Delivery[],
+    reason: "rate limit" | "settle window",
+  ): Delivery {
     const carrier = all[all.length - 1] as Delivery;
-    const rest = all.slice(0, -1);
-    const events = all.map((d) => d.event);
+    const directIds = all.map((d) => d.id);
+    const fullCohort = this.stores.deliveries.listCoalescedTree(directIds);
+    const events = fullCohort.map((d) => d.event);
+    const restIds = fullCohort.map((d) => d.id).filter((id) => id !== carrier.id);
+
+    const maxAttempts = Math.max(...fullCohort.map((d) => d.attemptCount));
+    if (maxAttempts > carrier.attemptCount) {
+      this.stores.deliveries.updateAttemptCount(carrier.id, maxAttempts);
+      carrier.attemptCount = maxAttempts;
+    }
+
     const template = route.promptTemplate ?? DEFAULT_TEMPLATES[route.source];
     let instructions: string;
     try {
@@ -195,15 +237,16 @@ export class DeliveryQueue {
       source: route.source,
       instructions,
       events,
+      reason,
     });
     this.stores.deliveries.updatePrompt(carrier.id, digest);
-    this.stores.deliveries.markCoalesced(
-      rest.map((d) => d.id),
-      carrier.id,
-    );
+    carrier.renderedPrompt = digest;
+    this.stores.deliveries.markCoalesced(restIds, carrier.id);
     this.logger.info(
-      { route: route.name, coalesced: rest.length + 1 },
-      "rate limit exceeded — coalesced deliveries into a digest turn",
+      { route: route.name, coalesced: restIds.length + 1, reason },
+      reason === "settle window"
+        ? "settle window complete — coalesced deliveries into a digest turn"
+        : "rate limit exceeded — coalesced deliveries into a digest turn",
     );
     return this.stores.deliveries.get(carrier.id) ?? carrier;
   }
@@ -227,7 +270,7 @@ export class DeliveryQueue {
   }
 
   private async deliver(route: Route, delivery: Delivery, prompt: string) {
-    const opts = { sandbox: route.sandbox };
+    const opts: DeliveryOptions = { sandbox: route.sandbox, networkAccess: route.networkAccess };
     if (route.target.type === "thread") {
       return this.adapter.deliverToThread(route.target.threadId, prompt, opts);
     }

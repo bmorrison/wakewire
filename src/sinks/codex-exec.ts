@@ -29,6 +29,11 @@ export class CodexExecAdapter implements AgentAdapter {
     prompt: string,
     opts: DeliveryOptions,
   ): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const { args, lastMessageFile } = this.baseArgs(opts);
     // "-" reads the prompt from stdin — rendered prompts can exceed argv limits.
     args.push("resume", threadId, "-");
@@ -40,6 +45,11 @@ export class CodexExecAdapter implements AgentAdapter {
   }
 
   async startThread(prompt: string, opts: DeliveryOptions): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const { args, lastMessageFile } = this.baseArgs(opts, { cd: true });
     args.push("-");
     const { stdout } = await this.run(args, null, prompt);
@@ -61,22 +71,7 @@ export class CodexExecAdapter implements AgentAdapter {
     opts: DeliveryOptions,
     flags: { cd?: boolean } = {},
   ): { args: string[]; lastMessageFile: string } {
-    const lastMessageFile = path.join(
-      os.tmpdir(),
-      `wakewire-last-message-${process.pid}-${Math.random().toString(36).slice(2)}.txt`,
-    );
-    const args = [
-      "exec",
-      "--json",
-      "--skip-git-repo-check",
-      "--sandbox",
-      opts.sandbox,
-      "--output-last-message",
-      lastMessageFile,
-    ];
-    if (this.config.model) args.push("--model", this.config.model);
-    if (flags.cd && opts.cwd) args.push("--cd", opts.cwd);
-    return { args, lastMessageFile };
+    return buildExecArgs(opts, this.config, flags);
   }
 
   private async run(
@@ -164,4 +159,31 @@ function readAndUnlink(file: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Construct CLI arguments for a `codex exec` invocation with explicit sandbox & network overrides. */
+export function buildExecArgs(
+  opts: DeliveryOptions,
+  config: CodexExecAdapterConfig = {},
+  flags: { cd?: boolean } = {},
+): { args: string[]; lastMessageFile: string } {
+  const lastMessageFile = path.join(
+    os.tmpdir(),
+    `wakewire-last-message-${process.pid}-${Math.random().toString(36).slice(2)}.txt`,
+  );
+  const args = [
+    "exec",
+    "--json",
+    "--skip-git-repo-check",
+    "--sandbox",
+    opts.sandbox,
+    "--output-last-message",
+    lastMessageFile,
+  ];
+  if (opts.sandbox === "workspace-write" && !opts.networkAccess) {
+    args.push("--config", "sandbox_workspace_write.network_access=false");
+  }
+  if (config.model) args.push("--model", config.model);
+  if (flags.cd && opts.cwd) args.push("--cd", opts.cwd);
+  return { args, lastMessageFile };
 }

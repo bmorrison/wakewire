@@ -6,6 +6,8 @@ import { WebhookMappingSchema } from "../sources/webhook/map.js";
 import { WebhookVerificationSchema } from "../sources/webhook/verify.js";
 import { VERSION } from "../version.js";
 
+import { buildRouteCreateBody, WakewireRouteAddInputSchema } from "./route-add.js";
+
 /**
  * Stdio MCP server bundled in the Codex plugin. It is a thin, stateless client
  * of the daemon's localhost API — all state lives in the daemon.
@@ -30,82 +32,25 @@ export async function runMcpServer(): Promise<void> {
       title: "Add a wakewire route",
       description:
         "Create a route that delivers matching external events into a Codex thread. " +
-        'For GitHub, match is like {"repo":"owner/repo","events":["push"],"branches":["main"]}. ' +
+        'For GitHub, match is like {"repo":"owner/repo","events":["push"],"branches":["main"]} or ' +
+        '{"repo":"owner/repo","events":["pull_request_review_comment.created"],"pullRequests":[143],"actors":["chatgpt-codex-connector[bot]"]}. ' +
         'For Gmail, match is like {"label":"agent-inbox"} (a label is required). ' +
         'For Slack, match is like {"events":["app_mention"]} or {"channels":["#dev"],"events":["message"]} ' +
         "(matching plain messages requires naming channels). " +
         'For generic webhook sources, match is like {"provider":"sentry","events":["issue"],"where":[{"field":"level","equals":"error"}]}. ' +
-        'target.type "this-thread" targets the current conversation — the tool will tell you how to resolve the thread id if it cannot.',
-      inputSchema: {
-        name: z.string().min(1).describe("Short human name for the route"),
-        source: z.enum(["github", "gmail", "slack", "webhook"]),
-        match: z
-          .record(z.string(), z.unknown())
-          .describe("Source-specific match rules (see tool description)"),
-        target: z.object({
-          type: z.enum(["this-thread", "thread", "new-thread"]),
-          threadId: z.string().optional().describe('Required when type is "thread"'),
-          cwd: z.string().optional().describe('Required when type is "new-thread"'),
-          worktree: z
-            .boolean()
-            .optional()
-            .describe("new-thread only: run in a fresh git worktree per delivery"),
-        }),
-        promptTemplate: z
-          .string()
-          .optional()
-          .describe(
-            "Optional instructions template. May interpolate only whitelisted summary fields " +
-              "like {{summary}}, {{repo}}, {{branch}}, {{subject}} — never raw payload content.",
-          ),
-        sandbox: z
-          .enum(["read-only", "workspace-write"])
-          .optional()
-          .describe(
-            "Sandbox for injected turns. Default read-only. Gmail routes are always read-only.",
-          ),
-        rateLimitPerMinute: z
-          .number()
-          .int()
-          .positive()
-          .max(600)
-          .optional()
-          .describe(
-            "Deliveries per minute for this route before bursts coalesce into a digest turn (default 10).",
-          ),
-      },
+        'target.type "this-thread" targets the current conversation — the tool will tell you how to resolve the thread id if it cannot. ' +
+        "networkAccess is default-off and accepted only for github workspace-write routes.",
+      inputSchema: WakewireRouteAddInputSchema,
     },
     async (args) => {
-      if (args.target.type === "this-thread") {
-        return text(
-          [
-            "To target the current thread I need its id, and MCP tools cannot see it.",
-            "Do this now:",
-            '1. Run this shell command in this conversation: echo "$CODEX_THREAD_ID"',
-            "   (Codex exposes the current thread id to shell commands.)",
-            '2. Call wakewire_route_add again with target {"type":"thread","threadId":"<the value>"}.',
-          ].join("\n"),
-        );
+      const { error, instructions, body } = buildRouteCreateBody(args);
+      if (instructions) {
+        return text(instructions);
       }
-      if (args.target.type === "thread" && !args.target.threadId) {
-        return text('target.type "thread" requires target.threadId');
+      if (error) {
+        return text(error);
       }
-      if (args.target.type === "new-thread" && !args.target.cwd) {
-        return text('target.type "new-thread" requires target.cwd (an absolute path)');
-      }
-      const target =
-        args.target.type === "thread"
-          ? { type: "thread", threadId: args.target.threadId }
-          : { type: "new-thread", cwd: args.target.cwd, worktree: args.target.worktree ?? false };
-      const result = await call("POST", "/api/routes", {
-        name: args.name,
-        source: args.source,
-        match: args.match,
-        target,
-        ...(args.promptTemplate ? { promptTemplate: args.promptTemplate } : {}),
-        ...(args.sandbox ? { sandbox: args.sandbox } : {}),
-        ...(args.rateLimitPerMinute ? { rateLimitPerMinute: args.rateLimitPerMinute } : {}),
-      });
+      const result = await call("POST", "/api/routes", body);
       return appendNote(
         result,
         "Sandbox note: the sandbox policy is applied to each injected turn (and to subsequent turns " +

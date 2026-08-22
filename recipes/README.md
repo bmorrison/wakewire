@@ -14,4 +14,4 @@ General workflow for a provider without a recipe:
 4. Re-run `wakewire_source_setup_webhook` with the mapping you authored.
 5. `wakewire_route_add` with `source: "webhook"`, `match: {"provider": "<name>"}`.
 
-Recipes: [clickup.md](clickup.md) · [linear.md](linear.md) · [sentry.md](sentry.md)
+Recipes: [clickup.md](clickup.md) · [linear.md](linear.md) · [sentry.md](sentry.md) · [codex-review-loop.md](codex-review-loop.md)

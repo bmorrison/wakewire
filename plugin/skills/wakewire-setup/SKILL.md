@@ -55,6 +55,23 @@ Use the generic webhook source. The loop:
 5. Route with `source: "webhook"`, `match: {"provider": "<name>", "where": [...]}`.
 Known-provider presets (ClickUp, Linear, Sentry) are in the package's recipes/ directory.
 
+### Codex Code Review Remediation Loop
+For automated, event-driven remediation of GitHub PR reviews from Codex:
+1. Check `wakewire_status`. Verify `adapter.networkEnabledRoutesSupported === true` and `adapter.sharedServerConfigured === true`. If not, have the user configure `sink.appServerListen` (e.g. `ws://127.0.0.1:4571`) and restart WakeWire. Note: A configured listener alone indicates server capability, not that a live TUI is currently connected.
+2. Ask the user to confirm their interactive CLI session is attached with `codex --remote ws://127.0.0.1:4571` in the PR checkout directory.
+3. Resolve `CODEX_THREAD_ID` via `echo "$CODEX_THREAD_ID"`.
+4. Resolve normal GitHub metadata for the route's PR: base repository/PR identity, head repository owner/name, head branch, head SHA, and base repository default branch. Inspect existing Git remotes and choose exactly one whose normalized fetch **and** push repository URLs match the authoritative head repository. If no remote or more than one remote matches, refuse registration; never add/change a remote or assume `origin`. Fetch from that `<HEAD_REMOTE>` and require fetched SHA, local `HEAD`, and authoritative PR head SHA to match. Verify the current branch is the head branch and not the default branch.
+5. Prove `codex-grok-review status <PR>` is runnable. Refuse registration if the command is missing or cannot run.
+6. Explain the explicit write + network access grant: the route will have standing authorization to edit files, execute tests, commit with review trailers, push only via `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` without force, and request review. The selected remote must map to the PR head repository, never a same-named branch in the base repository. Obtain explicit user authorization.
+7. Call `wakewire_route_add` using the recipe in `recipes/codex-review-loop.md`:
+   - `events`: `["pull_request_review.submitted", "pull_request_review_comment.created", "issue_comment.created"]`
+   - `pullRequests`: `[<PR>]`
+   - `actors`: `["chatgpt-codex-connector[bot]"]`
+   - `sandbox`: `"workspace-write"`
+   - `networkAccess`: `true`
+   - `settleSeconds`: `45`
+8. Finish setup by emitting the initialized `WAKEWIRE_REVIEW_STATE` marker with `baselineHead` and `lastSeenHead` set to current HEAD.
+
 ## 3. Create the route
 
 Call `wakewire_route_add`. Examples:
@@ -70,6 +87,43 @@ Call `wakewire_route_add`. Examples:
   }
   ```
 - Labeled email into this thread: `match: {"label": "agent-inbox"}`.
+
+### Codex Review Remediation Loop Setup
+
+To set up an autonomous review remediation loop for a specific PR:
+
+1. **Verify daemon readiness**:
+   Call `wakewire_status`. Verify:
+   - `adapter.networkEnabledRoutesSupported === true` (requires `codex-app-server` adapter)
+   - `adapter.sharedServerConfigured === true` (requires `appServerListen` configured)
+2. **Confirm attached session**:
+   Ask the user to confirm that their target Codex CLI session is attached via `codex --remote <listenUrl>` in the PR's working directory. (A configured listener alone does NOT mean a session is currently attached).
+3. **Resolve thread and verify checkout**:
+   - Run `echo "$CODEX_THREAD_ID"` to obtain the thread ID.
+   - Resolve normal GitHub metadata for the PR (base repo/PR identity, head repo, head branch, head SHA, and default branch). Inspect existing Git remotes, normalize their fetch and push URLs, and select exactly one `<HEAD_REMOTE>` whose two URLs match the head repository. Refuse if zero or multiple remotes match; never add/change a remote or assume `origin`.
+   - Run `git status --short` and `git rev-parse HEAD`; fetch `<verified-pr-head-branch>` from `<HEAD_REMOTE>` and require fetched SHA, local `HEAD`, and authoritative PR head SHA to agree. Confirm the clean checkout is on that PR branch, never the default branch.
+   - Run `codex-grok-review status <PR>` to confirm the review tool is installed and functional.
+4. **Obtain explicit authorization**:
+   Explain clearly that the route grants standing authorization for this specific PR to:
+   - Edit files in the working directory
+   - Execute test and validation gates
+   - Create normal commits with `WakeWire-Review-*` trailers
+   - Push without force only to the verified head remote: `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>`
+   - Post `@codex review` re-review requests
+   Obtain explicit confirmation from the user.
+5. **Add route**:
+   Call `wakewire_route_add` with the parameters from `recipes/codex-review-loop.md`:
+   - `match`: `{ "repo": "owner/repo", "events": ["pull_request_review.submitted", "pull_request_review_comment.created", "issue_comment.created"], "pullRequests": [<PR>], "actors": ["chatgpt-codex-connector[bot]"] }`
+   - `target`: `{ "type": "thread", "threadId": "<CODEX_THREAD_ID>" }`
+   - `sandbox`: `"workspace-write"`
+   - `networkAccess`: `true`
+   - `settleSeconds`: `45`
+   - `promptTemplate`: instructions referencing `$wakewire-codex-review-loop` and `$codex-grok-review`.
+6. **Emit Initial State Marker**:
+   Emit the initialized state marker with the verified HEAD commit:
+   ```text
+   WAKEWIRE_REVIEW_STATE {"version":1,"repo":"owner/repo","pr":143,"baselineHead":"<HEAD_SHA>","lastSeenHead":"<HEAD_SHA>","remediationRounds":0,"consecutiveErrors":0,"lastRequestedHead":null,"outcome":"registered"}
+   ```
 
 Prompt templates may interpolate only whitelisted summary fields ({{summary}}, {{repo}}, {{branch}}, {{kind}}, {{subject}}, {{from}}, …). Event payloads are always delivered as fenced untrusted data — remind the user that email/commit content must be treated as data, not instructions.
 

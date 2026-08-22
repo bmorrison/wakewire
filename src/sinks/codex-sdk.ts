@@ -37,12 +37,22 @@ export class CodexSdkAdapter implements AgentAdapter {
     prompt: string,
     opts: DeliveryOptions,
   ): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const thread = this.codex.resumeThread(threadId, this.threadOptions(opts));
     const turn = await this.runMapped(() => thread.run(prompt), threadId);
     return { threadId, finalResponse: turn.finalResponse };
   }
 
   async startThread(prompt: string, opts: DeliveryOptions): Promise<DeliveryResult> {
+    if (opts.networkAccess) {
+      throw new PermanentError(
+        "explicit network-enabled routes require the codex-app-server adapter",
+      );
+    }
     const thread = this.codex.startThread(this.threadOptions(opts));
     const turn = await this.runMapped(() => thread.run(prompt), null);
     if (!thread.id) throw new UnreachableError("codex did not report a thread id");
@@ -58,13 +68,7 @@ export class CodexSdkAdapter implements AgentAdapter {
   }
 
   private threadOptions(opts: DeliveryOptions): ThreadOptions {
-    return {
-      sandboxMode: opts.sandbox,
-      approvalPolicy: "never", // unattended: never block on approval prompts
-      skipGitRepoCheck: true,
-      ...(opts.cwd ? { workingDirectory: opts.cwd } : {}),
-      ...(this.config.model ? { model: this.config.model } : {}),
-    };
+    return buildSdkThreadOptions(opts, this.config);
   }
 
   private async runMapped<T>(fn: () => Promise<T>, threadId: string | null): Promise<T> {
@@ -86,4 +90,21 @@ export function mapCodexError(err: unknown, threadId: string | null, logger: Log
   }
   logger.debug({ err: message }, "codex run error");
   return err instanceof Error ? err : new Error(message);
+}
+
+/** Construct ThreadOptions for `@openai/codex-sdk` with explicit sandbox & network overrides. */
+export function buildSdkThreadOptions(
+  opts: DeliveryOptions,
+  config: CodexSdkAdapterConfig = {},
+): ThreadOptions {
+  return {
+    sandboxMode: opts.sandbox,
+    approvalPolicy: "never", // unattended: never block on approval prompts
+    skipGitRepoCheck: true,
+    ...(opts.sandbox === "workspace-write" && !opts.networkAccess
+      ? { networkAccessEnabled: false }
+      : {}),
+    ...(opts.cwd ? { workingDirectory: opts.cwd } : {}),
+    ...(config.model ? { model: config.model } : {}),
+  };
 }

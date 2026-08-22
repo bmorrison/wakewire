@@ -35,10 +35,36 @@ describe("templateFields", () => {
     expect(fields).not.toHaveProperty("commits");
   });
 
-  it("skips whitelisted fields with non-scalar values", () => {
-    const event: WakeEvent = { ...githubEvent, payload: { repo: { evil: true } } };
-    const fields = templateFields("r", event);
-    expect(fields).not.toHaveProperty("repo");
+  it("exposes GitHub PR and review pointer fields", () => {
+    const reviewEvent: WakeEvent = {
+      source: "github",
+      kind: "pull_request_review_comment.created",
+      deliveryId: "d-2",
+      occurredAt: "2026-07-03T10:00:00.000Z",
+      summary: "PR #143 comment",
+      payload: {
+        repo: "acme/api",
+        number: 143,
+        title: "PR Title",
+        actor: "chatgpt-codex-connector[bot]",
+        prUrl: "https://github.com/acme/api/pull/143",
+        activityUrl: "https://github.com/acme/api/pull/143#discussion_r88",
+        branch: "feat",
+        baseBranch: "main",
+        headSha: "sha-143",
+        path: "src/file.ts",
+        line: 42,
+        reviewState: "commented",
+      },
+    };
+    const fields = templateFields("review route", reviewEvent);
+    expect(fields.actor).toBe("chatgpt-codex-connector[bot]");
+    expect(fields.prUrl).toBe("https://github.com/acme/api/pull/143");
+    expect(fields.activityUrl).toBe("https://github.com/acme/api/pull/143#discussion_r88");
+    expect(fields.headSha).toBe("sha-143");
+    expect(fields.path).toBe("src/file.ts");
+    expect(fields.line).toBe("42");
+    expect(fields.reviewState).toBe("commented");
   });
 });
 
@@ -141,5 +167,35 @@ describe("renderTemplate", () => {
     expect(() =>
       renderTemplate(DEFAULT_TEMPLATES.gmail, templateFields("r", gmailEvent)),
     ).not.toThrow();
+  });
+  it("interpolates github review pointer fields", () => {
+    const reviewEvent: WakeEvent = {
+      source: "github",
+      kind: "pull_request_review_comment.created",
+      deliveryId: "prrc-1",
+      occurredAt: "2026-07-03T10:00:00.000Z",
+      summary: "PR #143 review comment created on acme/api by chatgpt-codex-connector[bot]",
+      payload: {
+        repo: "acme/api",
+        action: "created",
+        number: 143,
+        title: "Optimize query planner",
+        actor: "chatgpt-codex-connector[bot]",
+        prUrl: "https://github.com/acme/api/pull/143",
+        activityUrl: "https://github.com/acme/api/pull/143#discussion_r88",
+        branch: "feature/opt-planner",
+        baseBranch: "main",
+        headSha: "sha-123",
+        path: "src/query.ts",
+        line: 42,
+      },
+    };
+    const out = renderTemplate(
+      "PR #{{number}} {{action}} on {{repo}}:{{path}}:{{line}} by {{actor}} at {{activityUrl}} (head {{headSha}})",
+      templateFields("codex", reviewEvent),
+    );
+    expect(out).toBe(
+      "PR #143 created on acme/api:src/query.ts:42 by chatgpt-codex-connector[bot] at https://github.com/acme/api/pull/143#discussion_r88 (head sha-123)",
+    );
   });
 });

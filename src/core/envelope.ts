@@ -35,14 +35,15 @@ export function buildPrompt(input: EnvelopeInput): string {
   ].join("\n");
 }
 
-/** Digest turn used when a route exceeds its rate limit and deliveries are coalesced. */
+/** Digest turn used when a route exceeds its rate limit or settles across a quiet window and deliveries are coalesced. */
 export function buildDigestPrompt(input: {
   routeName: string;
   source: WakeEvent["source"];
   instructions: string;
   events: WakeEvent[];
+  reason?: "rate limit" | "settle window";
 }): string {
-  const { routeName, source, instructions, events } = input;
+  const { routeName, source, instructions, events, reason = "rate limit" } = input;
   const latest = events[events.length - 1];
   // Summaries here sit inside the <event> fence as plain text — escape "</" the
   // same way fenceSafeJson does so a summary containing "</event>" cannot close
@@ -54,7 +55,7 @@ export function buildDigestPrompt(input: {
   const latestJson = latest ? fenceSafeJson({ summary: latest.summary, ...latest.payload }) : "{}";
 
   return [
-    `[wakewire digest] ${routeName} — ${events.length} ${source} events coalesced (rate limit)`,
+    `[wakewire digest] ${routeName} — ${events.length} ${source} events coalesced (${reason})`,
     "",
     "INSTRUCTIONS (from the user's route config, written by the user, trusted):",
     instructions,
