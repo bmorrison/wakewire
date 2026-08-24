@@ -146,6 +146,20 @@ verified even over the relay.
 
 ### Choosing an ingress: smee vs listen
 
+The tested quick-start topology is:
+
+```text
+GitHub webhook → smee.io relay (created by WakeWire) → local WakeWire daemon
+               → loopback Codex App Server → target Codex thread
+```
+
+There is no Cloudflare, ngrok, or Tailscale prerequisite for this path. Calling
+`wakewire_source_setup_github` without a `mode` creates the smee.io channel,
+stores the source, and returns the webhook URL and signing secret. The only
+manual provider step is adding that URL and secret in the repository's GitHub
+webhook settings. An agent should offer this self-contained path for a quick
+test or public repository instead of asking the user to provision a tunnel.
+
 The default `smee` mode relays webhooks through the public **smee.io** service so
 you need no open ports. **This is a development/testing tool — not for real use.**
 GitHub says so about smee in its own docs ("never use Smee for an application in
@@ -168,6 +182,10 @@ understand:
 
 **Rule of thumb: smee for testing and already-public content; `listen` mode for
 anything private or anything you can't afford to silently lose.**
+
+Cloudflare Tunnel is one option for that second case, not a WakeWire setup
+requirement. Select `listen` mode only after choosing the private/reliable
+ingress path with the user.
 
 ### `listen` mode (the real-use path)
 

@@ -25,6 +25,10 @@ Wake an attached Codex CLI session on OpenAI Codex Code Review webhook events, a
    - `Pull request review comments` (`pull_request_review_comment`)
    - `Issue comments` (`issue_comment`)
    *(Mode `listen` behind a secure tunnel is recommended for private or loss-sensitive repositories.)*
+
+   For a quick test on a public repository, call
+   `wakewire_source_setup_github` in its default mode. WakeWire creates the
+   smee.io relay channel automatically; Cloudflare Tunnel is not a prerequisite.
 5. **Verified PR Head Remote**:
    Resolve normal GitHub metadata for the target PR's base repository/identity, head repository owner/name, head branch, head SHA, and default branch. Inspect existing Git remotes and normalize each remote's effective fetch and push URLs to the authoritative GitHub host/owner/repo identity. Select exactly one `<HEAD_REMOTE>` only when both URLs match the PR head repository. Refuse registration if no remote or multiple remotes match; never add/change a remote or assume `origin`. Fetch from `<HEAD_REMOTE>` and require fetched SHA, local `HEAD`, and authoritative PR head SHA to match before registration. This prevents a same-named branch on the base repository from being selected accidentally.
 

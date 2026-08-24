@@ -51,6 +51,12 @@ Paste into the target thread:
 > this thread. Create the GitHub source with wakewire_source_setup_github, relay
 > the webhook URL and secret to me so I can add them to GitHub settings, then add the route.
 
+The default quick setup does **not** require you to provision Cloudflare Tunnel.
+`wakewire_source_setup_github` creates a temporary smee.io relay channel itself;
+you only add the returned URL and secret to the GitHub webhook. Use direct
+`listen` mode and your own secured tunnel for private or loss-sensitive webhook
+traffic. The detailed tradeoffs are in [docs/setup.md](setup.md#choosing-an-ingress-smee-vs-listen).
+
 ## 3. Next steps & Recipes
 
 - **Detailed Source Setup:** See [docs/setup.md](setup.md) for full Gmail, Slack, and generic webhook instructions.

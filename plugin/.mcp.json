@@ -1,6 +1,8 @@
 {
-  "wakewire": {
-    "command": "npx",
-    "args": ["-y", "wakewire", "mcp"]
+  "mcpServers": {
+    "wakewire": {
+      "command": "npx",
+      "args": ["-y", "wakewire", "mcp"]
+    }
   }
 }

@@ -57,6 +57,13 @@ thread id, creating a smee.io relay channel, giving you the webhook URL + secret
 to paste into GitHub, and adding the route. Test it with a push — the turn should
 arrive within seconds.
 
+**No Cloudflare tunnel is required for that quick path.** WakeWire creates the
+smee.io channel itself; your only provider-side step is adding the returned URL
+and secret to the GitHub webhook. This is the topology used for the end-to-end
+smoke test. Use direct `listen` mode behind Cloudflare Tunnel, Tailscale Funnel,
+or another secured ingress only when the repository is private or webhook
+confidentiality/reliability matters.
+
 **Watch it live (one opt-in setting):** enable shared-server mode and a
 `codex --remote` TUI streams injected turns in token-by-token:
 

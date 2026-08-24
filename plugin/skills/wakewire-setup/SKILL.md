@@ -42,9 +42,21 @@ If the user prefers fresh threads per event (e.g. "spawn a worktree and investig
 ## 2. Set up the source
 
 ### GitHub
-1. Call `wakewire_source_setup_github` with the repo (e.g. `{"repo":"acme/api"}`). It creates a smee.io relay channel and returns a webhook URL, a secret, and step-by-step instructions.
-2. Relay those instructions to the user verbatim — they add the webhook in the repo settings. Warn them: smee.io is a public relay; payloads transit it, which is why wakewire verifies HMAC signatures and why private-repo users may prefer `{"mode":"listen"}` with their own tunnel.
-3. GitHub sends a `ping` on creation; `wakewire_status` should show the source received it.
+1. Choose ingress based on the actual use case. For a quick test or public
+   repository, call `wakewire_source_setup_github` with the repo and no `mode`
+   (e.g. `{"repo":"acme/api"}`). WakeWire creates the smee.io relay channel
+   itself and returns a webhook URL, secret, and instructions. Do not ask the
+   user to provision Cloudflare, ngrok, or Tailscale first.
+2. Relay the returned instructions verbatim — the user adds the URL and secret
+   in GitHub webhook settings. Warn that smee.io is a public, development-only
+   relay: payloads transit it and events can be lost while WakeWire is offline,
+   although WakeWire still verifies GitHub HMAC signatures.
+3. For a private repository or loss-sensitive webhook, explain that direct
+   `{"mode":"listen"}` needs a separately secured public ingress. Cloudflare
+   Tunnel is one option, not a WakeWire prerequisite. Confirm that choice before
+   requiring the user to provision external tunnel infrastructure.
+4. GitHub sends a `ping` on creation; `wakewire_status` should show that the
+   source received it.
 
 ### Gmail
 1. Ask which Gmail label to watch (never watch everything — a label is required) and the Gmail address.
