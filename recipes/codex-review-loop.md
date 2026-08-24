@@ -17,6 +17,10 @@ Wake an attached Codex CLI session on OpenAI Codex Code Review webhook events, a
    ```bash
    codex --remote ws://127.0.0.1:4571
    ```
+   In that TUI, open the exact thread that will be used as the route target and
+   keep it open to watch remediation rounds live. The chat used to configure
+   WakeWire is not automatically a monitoring console; another desktop or
+   non-remote chat may remain visibly idle even while the loop is working.
 3. **Installed Review Reader**:
    `codex-grok-review` skill or CLI command installed and runnable in the session.
 4. **GitHub Webhook Configuration**:

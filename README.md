@@ -73,9 +73,14 @@ wakewire config set sink.appServerListen ws://127.0.0.1:4571
 codex --remote ws://127.0.0.1:4571      # open your target thread here
 ```
 
-Without it, injected turns appear in the desktop app or `codex resume` when the
-thread is next opened. The daemon, configuration, routes, and installed plugin
-remain available to future sessions; the remote TUI attachment is per session.
+**The conversation used to configure WakeWire does not automatically become a
+live monitor.** A desktop-app chat or ordinary non-remote CLI may remain visibly
+idle while WakeWire handles a new event in the routed thread. To observe a PR
+review loop as it runs, keep the remote TUI open and select the exact thread id
+stored in that route. Without it, injected turns appear in the desktop app or
+`codex resume` when the thread is next opened or reloaded. The daemon,
+configuration, routes, and installed plugin remain available to future
+sessions; the remote TUI attachment is per session.
 (The listen port is off by default because it exposes an unauthenticated
 loopback control plane for codex — enable it knowingly. Codex documents the
 [App Server WebSocket transport](https://developers.openai.com/codex/app-server/#websocket-transport)

@@ -36,6 +36,13 @@ then in a `codex` CLI session run `/plugins`, install **WakeWire**, and restart.
 
 > Call wakewire_status and tell me if the daemon is healthy and Codex is reachable.
 
+**Visibility is separate from delivery.** The chat that configures WakeWire is
+not automatically a live monitoring console and may appear idle while another
+turn is running. To watch events arrive and see PR remediation rounds execute,
+start `codex --remote ws://127.0.0.1:4571` and open the exact thread targeted by
+the route. WakeWire continues running if that TUI closes, but you will not see
+live progress until you reconnect or reload the thread.
+
 ## 1. Pick where events should land
 
 Routes target a Codex thread. Open the thread you want (a dedicated "triage"

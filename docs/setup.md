@@ -101,7 +101,7 @@ paste the prompt into that same conversation.** A dedicated thread per source
 (e.g. one "Linear inbox" thread) is cleaner than reusing a working thread, since
 every event appends a turn.
 
-### Watching turns arrive live (optional, opt-in)
+### Watching turns arrive live (explicit client attachment)
 
 Live streaming needs one opt-in setting (the shared listen port is off by
 default — it exposes an unauthenticated loopback control plane for codex):
@@ -117,11 +117,18 @@ Then attach a TUI and open your target thread in it:
 codex --remote ws://127.0.0.1:4571
 ```
 
-(The desktop app keeps its own embedded server, so there turns appear on reload
-only — the TUI is the live view. The shared server is loopback-only and dies
-with the daemon. OpenAI currently marks the
+Opening the listener does not turn the conversation where setup occurred into a
+monitor. A desktop-app chat or ordinary CLI can remain visibly idle while
+WakeWire delivers and runs a new turn. In the remote TUI, select the **exact
+thread id stored in the route** and leave that TUI open to watch progress live.
+This is required if you expect to observe review remediation rounds as they
+happen; it is not required for background delivery itself.
+
+The desktop app keeps its own embedded server, so turns there appear on reload
+only. Closing the remote TUI removes the live view but does not stop WakeWire.
+The shared server is loopback-only and dies with the daemon. OpenAI currently marks the
 [App Server WebSocket transport](https://developers.openai.com/codex/app-server/#websocket-transport)
-as experimental.)
+as experimental.
 
 ---
 
@@ -226,6 +233,9 @@ For autonomous, event-driven remediation of GitHub PR reviews posted by Codex Co
    # restart WakeWire using the matching detached/service command above
    codex --remote ws://127.0.0.1:4571
    ```
+   Open the exact thread that will be stored in the route. The setup
+   conversation is not automatically a live monitor; a different desktop or
+   non-remote chat may remain visibly idle during later rounds.
 2. **Review Skill:** Ensure `codex-grok-review` is installed and runnable in the session.
 3. **GitHub Ingress:** Create a GitHub source subscribing to reviews and review comments (listen mode recommended for private repos).
 
