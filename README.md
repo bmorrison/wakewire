@@ -20,8 +20,25 @@ inspect it conversationally from inside Codex.
 ```bash
 npm install -g wakewire
 wakewire init
-wakewire start --detach          # or: wakewire service install (launchd/systemd)
 ```
+
+Then choose one process-management mode. For a manually managed background
+process, run `wakewire start --detach`. For an always-on user service, first
+record Codex's absolute path because
+launchd and systemd do not necessarily inherit your interactive shell's PATH:
+
+```bash
+command -v codex                # copy the absolute path this prints
+wakewire config set sink.codexPath /absolute/path/to/codex
+wakewire service install         # installs and starts a launchd agent on macOS
+wakewire status
+```
+
+On Linux, `wakewire service install` writes the systemd user unit; enable and
+start it with `systemctl --user daemon-reload && systemctl --user enable --now wakewire`.
+Use either detached mode or service mode, not both. See
+[Persistent service operation](docs/setup.md#persistent-service-operation) for
+restart, update, and durability details.
 
 Install the Codex plugin:
 
@@ -45,13 +62,17 @@ arrive within seconds.
 
 ```bash
 wakewire config set sink.appServerListen ws://127.0.0.1:4571
-wakewire stop && wakewire start --detach
+# restart WakeWire using the same detached/service mode you selected above
 codex --remote ws://127.0.0.1:4571      # open your target thread here
 ```
 
 Without it, injected turns appear in the desktop app or `codex resume` when the
-thread is next opened. (The listen port is off by default because it exposes an
-unauthenticated loopback control plane for codex — enable it knowingly.)
+thread is next opened. The daemon, configuration, routes, and installed plugin
+remain available to future sessions; the remote TUI attachment is per session.
+(The listen port is off by default because it exposes an unauthenticated
+loopback control plane for codex — enable it knowingly. Codex documents the
+[App Server WebSocket transport](https://developers.openai.com/codex/app-server/#websocket-transport)
+as experimental.)
 
 **For step-by-step setup of each source — with the exact terminal commands and
 copy-paste Codex prompts — see [docs/setup.md](docs/setup.md).**

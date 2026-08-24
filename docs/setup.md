@@ -7,7 +7,8 @@ thread id and creates the route from a prompt you paste.
 
 Commands below assume you've run `npm link` (or `npm install -g wakewire`) so
 `wakewire` is on your PATH; otherwise run them as `node dist/cli.js …` from the
-repo. The daemon must be running (`wakewire start --detach`).
+repo. The daemon must be running, either as a manually managed detached process
+or as a user service.
 
 ---
 
@@ -17,9 +18,12 @@ repo. The daemon must be running (`wakewire start --detach`).
 cd ~/dev/loyale/wakewire      # or wherever it lives
 npm link                      # puts `wakewire` on PATH (skip if installed globally)
 wakewire init
-wakewire start --detach
-wakewire status               # expect: adapter reachable, no errors
 ```
+
+Choose one mode: run `wakewire start --detach` for a manually managed
+background process, or follow **Persistent service operation** below. Do not run
+both. After starting either mode, `wakewire status` should report the adapter as
+reachable with no errors.
 
 Install the Codex plugin (once, and again after any rename):
 
@@ -30,6 +34,63 @@ codex plugin marketplace add ~/dev/loyale/wakewire
 Then in a `codex` CLI session, run `/plugins` → find **WakeWire** → Install →
 restart. In the desktop app, use the Plugins screen in settings instead. (If an
 old "Bridgehead" entry is still listed, uninstall it.)
+
+### Persistent service operation
+
+Service mode keeps WakeWire available after you close the terminal or Codex
+session. Before installing it, save Codex's absolute path: user services often
+start with a minimal PATH and otherwise report `adapter.codexReachable: false`.
+
+```bash
+command -v codex              # copy the absolute path; stop if this prints nothing
+wakewire config set sink.codexPath /absolute/path/to/codex
+wakewire service install
+wakewire status               # expect adapter.codexReachable: true
+```
+
+- **macOS:** installation loads a launchd agent immediately. It starts at login,
+  restarts after an unexpected exit, and runs while that user is logged in and
+  the Mac is awake.
+- **Linux:** installation writes `~/.config/systemd/user/wakewire.service` but
+  does not enable it. Run
+  `systemctl --user daemon-reload && systemctl --user enable --now wakewire`,
+  then use `systemctl --user restart wakewire` after configuration changes.
+- **Windows:** v1 has no native wrapper; use the foreground command or NSSM as
+  described in the README.
+
+Use either service mode or `wakewire start --detach`, not both. On macOS,
+launchd's `KeepAlive` means `wakewire stop` is not a durable way to stop an
+installed service—it will be relaunched. Run `wakewire service uninstall` to
+remove the managed service before switching back to detached mode.
+
+Configuration, secrets, routes, and delivery state live under `~/.wakewire` and
+survive daemon restarts and future Codex sessions. The plugin installation is
+also available to future Codex sessions. An interactive
+`codex --remote ws://127.0.0.1:4571` connection is different: attach it again in
+each TUI session when you want to see turns stream live. The daemon continues to
+deliver without a TUI attached, and those turns appear when the thread is next
+resumed or reloaded.
+
+If you installed from a local checkout with `npm link`, the service depends on
+that checkout's built `dist/` files and the Node runtime used during
+installation. Do not move/delete the checkout or remove that Node runtime while
+the service is installed. After pulling WakeWire source updates, run
+`npm run build`, then reload it with `wakewire service install` on macOS or
+`systemctl --user restart wakewire` on Linux.
+
+After a configuration change, restart the same mode you originally selected:
+
+```bash
+# Manually managed detached mode
+wakewire stop
+wakewire start --detach
+
+# macOS service mode (rewrites and reloads the launchd agent)
+wakewire service install
+
+# Linux service mode
+systemctl --user restart wakewire
+```
 
 ### How the model targets "this thread"
 
@@ -47,7 +108,7 @@ default — it exposes an unauthenticated loopback control plane for codex):
 
 ```bash
 wakewire config set sink.appServerListen ws://127.0.0.1:4571
-wakewire stop && wakewire start --detach
+# restart WakeWire using the matching command from Persistent service operation
 ```
 
 Then attach a TUI and open your target thread in it:
@@ -58,7 +119,9 @@ codex --remote ws://127.0.0.1:4571
 
 (The desktop app keeps its own embedded server, so there turns appear on reload
 only — the TUI is the live view. The shared server is loopback-only and dies
-with the daemon.)
+with the daemon. OpenAI currently marks the
+[App Server WebSocket transport](https://developers.openai.com/codex/app-server/#websocket-transport)
+as experimental.)
 
 ---
 
@@ -142,7 +205,7 @@ For autonomous, event-driven remediation of GitHub PR reviews posted by Codex Co
 1. **Shared App Server:** Configure `sink.appServerListen` and attach your interactive session:
    ```bash
    wakewire config set sink.appServerListen ws://127.0.0.1:4571
-   wakewire stop && wakewire start --detach
+   # restart WakeWire using the matching detached/service command above
    codex --remote ws://127.0.0.1:4571
    ```
 2. **Review Skill:** Ensure `codex-grok-review` is installed and runnable in the session.

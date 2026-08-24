@@ -13,10 +13,22 @@ Call `wakewire_status`.
   ```
   npm install -g wakewire
   wakewire init
-  wakewire start --detach     # or: wakewire service install (starts at login)
+  wakewire start --detach
   ```
+  For an always-on service instead, first resolve `command -v codex` and store
+  its absolute result with
+  `wakewire config set sink.codexPath /absolute/path/to/codex`; launchd/systemd
+  may not inherit the interactive shell PATH. Then run `wakewire service install`.
+  On macOS this loads the service immediately. On Linux, follow it with
+  `systemctl --user daemon-reload && systemctl --user enable --now wakewire`.
+  Never run detached and service modes at the same time.
   Then call `wakewire_status` again.
-- Confirm `adapter.codexReachable` is true. If not, codex isn't on PATH for the daemon — ask the user how they installed Codex.
+- Confirm `adapter.codexReachable` is true. If not, resolve Codex's absolute path,
+  store it in `sink.codexPath`, restart the same management mode, and check again.
+  On macOS, rerun `wakewire service install`; on Linux, use
+  `systemctl --user restart wakewire`; for detached mode, use `wakewire stop`
+  followed by `wakewire start --detach`. Do not use `wakewire stop` to stop an
+  installed macOS service because launchd's `KeepAlive` relaunches it.
 
 ## 1. Resolve the target thread
 
@@ -71,6 +83,11 @@ For automated, event-driven remediation of GitHub PR reviews from Codex:
    - `networkAccess`: `true`
    - `settleSeconds`: `45`
 8. Finish setup by emitting the initialized `WAKEWIRE_REVIEW_STATE` marker with `baselineHead` and `lastSeenHead` set to current HEAD.
+9. Tell the user that a green review, merge, or closed PR does not automatically
+   disable the route. When the loop is finished, identify the exact route with
+   `wakewire_route_list`, then disable it with `wakewire_route_toggle` or delete
+   it with `wakewire_route_remove`. Remove a shared GitHub source only when no
+   other routes depend on it.
 
 ## 3. Create the route
 

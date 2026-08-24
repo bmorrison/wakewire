@@ -10,9 +10,18 @@ prompts, so credentials never transit a model conversation.
 ```bash
 npm install -g wakewire
 wakewire init
-wakewire start --detach        # or: wakewire service install  (starts at login)
-wakewire status                # expect adapter.codexReachable: true
 ```
+
+Then choose one process-management mode. For a manually managed background
+process, run `wakewire start --detach`. For an always-on service instead,
+resolve Codex's absolute path with `command -v codex`, save it with
+`wakewire config set sink.codexPath /absolute/path/to/codex`, then run
+`wakewire service install`. That command installs and starts a launchd agent on
+macOS. On Linux it writes a systemd user unit; finish with
+`systemctl --user daemon-reload && systemctl --user enable --now wakewire`.
+Do not run both modes. Finally, run `wakewire status` and expect
+`adapter.codexReachable: true`. See
+[Persistent service operation](setup.md#persistent-service-operation).
 
 Install the Codex plugin:
 

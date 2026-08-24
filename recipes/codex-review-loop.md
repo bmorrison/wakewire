@@ -9,8 +9,9 @@ Wake an attached Codex CLI session on OpenAI Codex Code Review webhook events, a
    ```bash
    wakewire config set sink.adapter codex-app-server
    wakewire config set sink.appServerListen ws://127.0.0.1:4571
-   wakewire stop && wakewire start --detach
    ```
+   Restart WakeWire using the same detached or service mode you installed; see
+   [Persistent service operation](../docs/setup.md#persistent-service-operation).
 2. **Attached Session**:
    Open a terminal in the target repository checkout on the target PR branch:
    ```bash
@@ -66,3 +67,13 @@ Upon registration, emit the initialized `WAKEWIRE_REVIEW_STATE` marker with the 
 ```text
 WAKEWIRE_REVIEW_STATE {"version":1,"repo":"owner/repo","pr":143,"baselineHead":"<CURRENT_HEAD_SHA>","lastSeenHead":"<CURRENT_HEAD_SHA>","remediationRounds":0,"consecutiveErrors":0,"lastRequestedHead":null,"outcome":"registered"}
 ```
+
+## Completion and Cleanup
+
+A green review, merge, or closed PR does not automatically disable this route.
+That is deliberate: lifecycle changes are not assumed to revoke standing
+automation. When the loop is no longer needed, use `wakewire_route_list` to
+identify the exact PR-scoped route, then call `wakewire_route_toggle` with
+`enabled: false` to retain it for inspection or `wakewire_route_remove` to
+delete it. Remove the GitHub source separately with `wakewire_source_remove`
+only if no other routes use that source.
