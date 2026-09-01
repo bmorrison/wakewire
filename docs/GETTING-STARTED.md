@@ -19,6 +19,13 @@ resolve Codex's absolute path with `command -v codex`, save it with
 `wakewire service install`. That command installs and starts a launchd agent on
 macOS. On Linux it writes a systemd user unit; finish with
 `systemctl --user daemon-reload && systemctl --user enable --now wakewire`.
+`wakewire service install` snapshots a sanitized PATH containing the active Node
+runtime directory so plugin commands (like `npx`) resolve in Codex App Server
+subprocesses. If you switch Node versions or move tools, rerun `wakewire service
+install` to regenerate the definition; restarting alone retains the old PATH.
+On Linux, follow regeneration with `systemctl --user daemon-reload` and restart
+the enabled unit, or use `systemctl --user enable --now wakewire` when enabling
+it for the first time.
 Do not run both modes. Finally, run `wakewire status` and expect
 `adapter.codexReachable: true`. See
 [Persistent service operation](setup.md#persistent-service-operation).

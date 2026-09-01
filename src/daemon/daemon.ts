@@ -13,6 +13,7 @@ import { createAdapter } from "../sinks/factory.js";
 import { prepareWorktree } from "../sinks/worktree.js";
 import { VERSION } from "../version.js";
 import { createApi } from "./api.js";
+import { type LockOptions, withDaemonLock } from "./lock.js";
 import { SourceManager } from "./sources.js";
 
 export interface DaemonState {
@@ -124,17 +125,81 @@ export class Daemon {
   }
 }
 
+export interface DaemonLifecycle {
+  start(): Promise<unknown>;
+  stop(): Promise<void>;
+}
+
+export interface ShutdownSignalSource {
+  on(signal: NodeJS.Signals, listener: () => void): unknown;
+  off(signal: NodeJS.Signals, listener: () => void): unknown;
+}
+
+export interface ShutdownWaiter {
+  waitForShutdown(): Promise<void>;
+  dispose(): void;
+}
+
+/** Register persistent handlers before startup and retain them through cleanup. */
+export function createShutdownWaiter(source: ShutdownSignalSource = process): ShutdownWaiter {
+  let resolve!: () => void;
+  let signalled = false;
+  const wait = new Promise<void>((resolveWait) => {
+    resolve = resolveWait;
+  });
+  const shutdown = () => {
+    if (signalled) return;
+    signalled = true;
+    resolve();
+  };
+  source.on("SIGINT", shutdown);
+  source.on("SIGTERM", shutdown);
+  return {
+    waitForShutdown: () => wait,
+    dispose: () => {
+      source.off("SIGINT", shutdown);
+      source.off("SIGTERM", shutdown);
+    },
+  };
+}
+
+/**
+ * Keep startup, cleanup, and lease release in one production lifecycle. The
+ * injected arguments make its failure ordering testable without binding a port.
+ */
+export async function runDaemonLifecycle(
+  createDaemon: () => DaemonLifecycle,
+  waitForShutdown: () => Promise<void>,
+  lockOptions?: LockOptions,
+): Promise<void> {
+  await withDaemonLock(async () => {
+    const daemon = createDaemon();
+    try {
+      await daemon.start();
+      await waitForShutdown();
+    } finally {
+      await daemon.stop();
+    }
+  }, lockOptions);
+}
+
+export async function runDaemonWithShutdownSignals(
+  createDaemon: () => DaemonLifecycle,
+  signalSource: ShutdownSignalSource = process,
+  lockOptions?: LockOptions,
+): Promise<void> {
+  const shutdown = createShutdownWaiter(signalSource);
+  try {
+    await runDaemonLifecycle(createDaemon, shutdown.waitForShutdown, lockOptions);
+  } finally {
+    shutdown.dispose();
+  }
+}
+
 /** Run the daemon in the foreground until SIGINT/SIGTERM. */
 export async function runDaemon(logger: Logger): Promise<void> {
-  const daemon = new Daemon(logger);
-  await daemon.start();
-  await new Promise<void>((resolve) => {
-    const shutdown = () => {
-      void daemon.stop().finally(resolve);
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  });
+  await runDaemonWithShutdownSignals(() => new Daemon(logger));
+
   // Lingering source sockets (e.g. a tarpitted IMAP connect) must not keep a
   // cleanly-stopped daemon alive as a zombie.
   process.exit(0);

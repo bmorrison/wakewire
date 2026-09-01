@@ -21,14 +21,25 @@ Call `wakewire_status`.
   may not inherit the interactive shell PATH. Then run `wakewire service install`.
   On macOS this loads the service immediately. On Linux, follow it with
   `systemctl --user daemon-reload && systemctl --user enable --now wakewire`.
-  Never run detached and service modes at the same time.
+  Never run detached and service modes at the same time: starting detached mode
+  while a service definition is installed, or installing a service while a manual
+  daemon is running, will be rejected by the CLI.
+  `wakewire service install` snapshots a sanitized PATH containing the active Node
+  runtime directory so MCP tools (such as `npx`) can be executed by Codex; rerun
+  service installation whenever you change/remove Node versions or move tools.
+  On Linux, after that regeneration run `systemctl --user daemon-reload` and
+  restart the unit (or `systemctl --user enable --now wakewire` when it is not
+  enabled); a restart alone retains the old PATH definition.
   Then call `wakewire_status` again.
 - Confirm `adapter.codexReachable` is true. If not, resolve Codex's absolute path,
   store it in `sink.codexPath`, restart the same management mode, and check again.
-  On macOS, rerun `wakewire service install`; on Linux, use
-  `systemctl --user restart wakewire`; for detached mode, use `wakewire stop`
-  followed by `wakewire start --detach`. Do not use `wakewire stop` to stop an
-  installed macOS service because launchd's `KeepAlive` relaunches it.
+  On macOS, rerun `wakewire service install`; for Linux runtime/PATH changes,
+  rerun `wakewire service install`, then `systemctl --user daemon-reload &&
+  systemctl --user restart wakewire` (or `enable --now` if needed). A normal
+  Linux configuration-only restart can use `systemctl --user restart wakewire`.
+  For detached mode, use `wakewire stop` followed by `wakewire start --detach`.
+  Do not use `wakewire stop` to stop an installed macOS service because launchd's
+  `KeepAlive` relaunches it.
 
 ## 1. Resolve the target thread
 

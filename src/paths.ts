@@ -15,6 +15,11 @@ export function stateFilePath(): string {
   return path.join(wakewireHome(), "daemon.json");
 }
 
+/** Directory lock for single-instance daemon leasing per WAKEWIRE_HOME. Mode 0700. */
+export function daemonLockDir(): string {
+  return path.join(wakewireHome(), "daemon.lock");
+}
+
 export function logsDir(): string {
   return path.join(wakewireHome(), "logs");
 }
