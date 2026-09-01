@@ -8,10 +8,16 @@ import { authImap } from "./cli/auth-imap.js";
 import { authSlack } from "./cli/auth-slack.js";
 import { authWebhook } from "./cli/auth-webhook.js";
 import { configGet, configList, configSet } from "./cli/config-cmd.js";
+import {
+  isServiceInstalled,
+  ProcessModeConflictError,
+  validateProcessModeTransition,
+} from "./cli/process-mode.js";
 import { installService, uninstallService } from "./cli/service.js";
 import { apiFetch, readDaemonState } from "./client.js";
 import { loadConfig } from "./config.js";
 import { runDaemon } from "./daemon/daemon.js";
+import { isProcessAlive } from "./daemon/lock.js";
 import { openDatabase } from "./db/db.js";
 import { createStores } from "./db/repos.js";
 import { createLogger } from "./logging.js";
@@ -47,8 +53,26 @@ program
   .description("Run the daemon (foreground by default)")
   .option("-d, --detach", "fork to the background and return")
   .action(async (opts: { detach?: boolean }) => {
+    // This must precede daemon.json inspection: a live service daemon also
+    // writes that file, but detached mode needs to explain how to change modes.
+    if (opts.detach) {
+      try {
+        validateProcessModeTransition({
+          operation: "start-detached",
+          serviceInstalled: isServiceInstalled(),
+        });
+      } catch (err) {
+        if (err instanceof ProcessModeConflictError) {
+          console.error(err.message);
+          process.exitCode = 1;
+          return;
+        }
+        throw err;
+      }
+    }
+
     const existing = readDaemonState();
-    if (existing && processAlive(existing.pid)) {
+    if (existing && isProcessAlive(existing.pid)) {
       console.error(`daemon already running (pid ${existing.pid}, port ${existing.port})`);
       process.exitCode = 1;
       return;
@@ -70,7 +94,7 @@ program
   .description("Stop the running daemon")
   .action(() => {
     const state = readDaemonState();
-    if (!state || !processAlive(state.pid)) {
+    if (!state || !isProcessAlive(state.pid)) {
       console.log("daemon is not running");
       fs.rmSync(stateFilePath(), { force: true });
       return;
@@ -84,7 +108,7 @@ program
   .description("Show daemon status, sources, and queue depth")
   .action(async () => {
     const state = readDaemonState();
-    if (!state || !processAlive(state.pid)) {
+    if (!state || !isProcessAlive(state.pid)) {
       console.log("daemon: not running");
       return;
     }
@@ -192,15 +216,6 @@ program
   .action(async () => {
     await runMcpServer();
   });
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 program.parseAsync().catch((err) => {
   console.error(err instanceof Error ? err.message : err);

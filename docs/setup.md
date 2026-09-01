@@ -54,7 +54,10 @@ wakewire status               # expect adapter.codexReachable: true
 - **Linux:** installation writes `~/.config/systemd/user/wakewire.service` but
   does not enable it. Run
   `systemctl --user daemon-reload && systemctl --user enable --now wakewire`,
-  then use `systemctl --user restart wakewire` after configuration changes.
+  then use `systemctl --user restart wakewire` after ordinary configuration
+  changes. A runtime or PATH change is different: regenerate the unit first
+  with `wakewire service install`, then run `systemctl --user daemon-reload`
+  and restart it (or use `enable --now` if it is not enabled).
 - **Windows:** v1 has no native wrapper; use the foreground command or NSSM as
   described in the README.
 
@@ -73,10 +76,16 @@ resumed or reloaded.
 
 If you installed from a local checkout with `npm link`, the service depends on
 that checkout's built `dist/` files and the Node runtime used during
-installation. Do not move/delete the checkout or remove that Node runtime while
-the service is installed. After pulling WakeWire source updates, run
-`npm run build`, then reload it with `wakewire service install` on macOS or
-`systemctl --user restart wakewire` on Linux.
+installation. `wakewire service install` captures a sanitized PATH containing
+the active Node runtime directory so plugin MCP commands (such as `npx`) can be
+located when Codex App Server runs under launchd/systemd. Do not move/delete
+the checkout or remove that Node runtime while the service is installed. After
+pulling WakeWire source updates, switching Node versions, or moving CLI tools,
+run `npm run build` and regenerate the service definition with `wakewire service
+install`. On Linux, then run `systemctl --user daemon-reload && systemctl --user
+restart wakewire` (or `systemctl --user enable --now wakewire` if the unit is not
+enabled). Restarting or reloading alone does not replace the PATH captured in an
+existing service definition.
 
 After a configuration change, restart the same mode you originally selected:
 
@@ -88,8 +97,13 @@ wakewire start --detach
 # macOS service mode (rewrites and reloads the launchd agent)
 wakewire service install
 
-# Linux service mode
+# Linux service mode after an ordinary configuration change
 systemctl --user restart wakewire
+
+# Linux service mode after a Node runtime, PATH, or CLI-location change
+wakewire service install
+systemctl --user daemon-reload
+systemctl --user restart wakewire  # or: systemctl --user enable --now wakewire
 ```
 
 ### How the model targets "this thread"
@@ -415,6 +429,108 @@ From Codex, any time:
 - `wakewire_source_remove {id}` — stop and delete a source and its secrets.
 
 The `$wakewire-inspect` skill walks the model through triage using these.
+
+## Troubleshooting & Operations
+
+### MCP startup failed: No such file or directory (os error 2)
+
+When Codex App Server is started by launchd or systemd, plugin MCP commands like
+`npx -y wakewire mcp` fail with `os error 2` if the service environment's `PATH`
+does not include the directory where `npx` (or Node) resides.
+
+The missing command may have been present in the plugin configuration long before
+the error was reported. The defect stays latent while an existing shared App
+Server keeps its inherited environment; it becomes visible when that server
+restarts and creates the MCP subprocess, or when newer startup reporting exposes
+the failure.
+
+**Inspect, fix, and verify:**
+
+1. Inspect the configured and running service PATH. Replace `<daemon-pid>` with
+   the exact WakeWire daemon PID from `~/.wakewire/daemon.json` (or the
+   equivalent file under `WAKEWIRE_HOME`) or the process list—do not use a Codex
+   client PID.
+
+   ```bash
+   # macOS: launchd's configured environment, then the daemon's actual environment
+   launchctl print gui/$(id -u)/io.wakewire.daemon | rg 'PATH'
+   ps eww -p <daemon-pid> | tr ' ' '\n' | rg '^PATH='
+
+   # Linux: systemd's configured environment, then the daemon's actual environment
+   systemctl --user show wakewire --property=Environment --value
+   tr '\0' '\n' </proc/<daemon-pid>/environ | rg '^PATH='
+   ```
+
+2. Copy the `PATH=` value from the running daemon and test the bundled plugin
+   command in exactly that environment. It must print an `npx` path and a
+   version; if either fails, the service PATH cannot start `npx -y wakewire mcp`.
+
+   ```bash
+   env -i PATH='<PATH copied from the daemon>' /bin/sh -c 'command -v npx && npx --version'
+   ```
+
+3. Rebuild the fork, then regenerate the definition—not just the running
+   process—so it captures the current Node runtime directory:
+
+   ```bash
+   npm run build
+   wakewire service install
+   ```
+
+   On Linux, follow that with `systemctl --user daemon-reload && systemctl
+   --user restart wakewire`; use `systemctl --user enable --now wakewire` instead
+   if the unit is not enabled. On macOS, `wakewire service install` rewrites and
+   reloads the launchd agent. Repeat steps 1–2 after it starts.
+
+4. An already-running shared App Server retains its original environment. After
+   the service reload, open a **new** shared remote session with `codex --remote
+   ws://127.0.0.1:4571`, load the local WakeWire plugin, call `wakewire_status`,
+   and confirm its MCP server reaches ready state without `os error 2`.
+
+### Duplicate daemon recovery
+
+If detached and service modes were accidentally mixed or multiple background
+processes remain from earlier sessions, follow this procedure. The paths below
+use the default home; substitute the configured `WAKEWIRE_HOME` if you use one:
+
+1. **Identify the exact WakeWire daemon and shared App Server processes:**
+   ```bash
+   ps -axo pid=,ppid=,command= | rg '[w]akewire|[c]odex app-server'
+   ```
+   Record each PID and PPID. Confirm managed ownership with `launchctl print
+   gui/$(id -u)/io.wakewire.daemon` on macOS or `systemctl --user status
+   wakewire` on Linux; do not stop an unrelated Codex process.
+2. **Unload or uninstall the managed service first:**
+   - macOS: `wakewire service uninstall` (or `launchctl unload ~/Library/LaunchAgents/io.wakewire.daemon.plist`)
+   - Linux: `wakewire service uninstall` (or `systemctl --user stop wakewire`)
+3. **Stop only the remaining, verified detached WakeWire daemon PIDs gracefully:**
+   ```bash
+   kill -TERM <pid>
+   ```
+   Allow each PID to exit before continuing; do not use `pkill` or force-kill a
+   process merely because its command contains `codex`.
+4. **Verify that no WakeWire daemon remains:**
+   ```bash
+   ps -axo pid=,ppid=,command= | rg '[w]akewire'
+   ```
+   Confirm that no WakeWire `start` daemon remains. A `wakewire mcp` process
+   owned by an active Codex client is not a daemon and does not need to be
+   stopped.
+5. **Clean stale locks only after confirming recorded PIDs are dead:**
+   Read `~/.wakewire/daemon.lock/owner.json` and `~/.wakewire/daemon.json`, then
+   confirm each recorded PID is absent with `ps -p <recorded-pid>`. Only then
+   remove those exact stale entries:
+   ```bash
+   rm -f ~/.wakewire/daemon.lock/owner.json
+   rmdir ~/.wakewire/daemon.lock
+   rm -f ~/.wakewire/daemon.json
+   ```
+   If `rmdir` reports unexpected contents, stop and inspect them rather than
+   forcing deletion. Do not use broad `pkill`, wildcard deletion, or delete
+   `~/.wakewire/state.db`, secrets, routes, or delivery history.
+6. **Start exactly one selected mode:**
+   - For persistent service mode: `wakewire service install`
+   - For manually managed detached mode: `wakewire start --detach`
 
 ## Rotating secrets
 

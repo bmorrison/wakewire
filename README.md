@@ -36,6 +36,12 @@ wakewire status
 
 On Linux, `wakewire service install` writes the systemd user unit; enable and
 start it with `systemctl --user daemon-reload && systemctl --user enable --now wakewire`.
+`wakewire service install` snapshots a sanitized PATH containing the active Node
+runtime directory (so plugin commands like `npx` resolve). After changing or
+removing a Node version, or moving CLI tools, regenerate the service definition
+with `wakewire service install`—a restart alone keeps the old PATH. On Linux,
+then run `systemctl --user daemon-reload` and restart the enabled unit (or use
+`systemctl --user enable --now wakewire` if it is not enabled yet).
 Use either detached mode or service mode, not both. See
 [Persistent service operation](docs/setup.md#persistent-service-operation) for
 restart, update, and durability details.
