@@ -59,6 +59,8 @@ describe("buildPrompt", () => {
     });
     expect(prompt).toContain("ROUTE EXECUTION POLICY — SUPERVISED REVIEW REMEDIATION");
     expect(prompt).toContain("standing authorization");
+    expect(prompt).toContain("after-push review-trigger policy");
+    expect(prompt).not.toContain("re-review procedure");
     expect(prompt).toContain("reviewed passes, not individual commits");
     expect(prompt).toContain("without requiring a state reset");
     expect(prompt).toContain("Do not ask for redundant per-pass permission");

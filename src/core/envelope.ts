@@ -96,7 +96,7 @@ function routePolicy(reviewRemediation: boolean): string {
   }
   return [
     "ROUTE EXECUTION POLICY — SUPERVISED REVIEW REMEDIATION:",
-    "The route's one-time setup confirmation is standing authorization for the registered PR only: follow the review-loop skill's bounded edit, validate, commit, non-force-push, and re-review procedure on every wake-up.",
+    "The route's one-time setup confirmation is standing authorization for the registered PR only: follow the review-loop skill's bounded edit, validate, commit, and non-force-push procedure on every wake-up, plus the route's explicit after-push review-trigger policy.",
     "Review rounds identify reviewed passes, not individual commits. A scoped validation or CI correction may reuse the current round trailer without requiring a state reset.",
     "Do not ask for redundant per-pass permission. Stop instead when that skill's preflight or scope checks fail.",
   ].join("\n");
