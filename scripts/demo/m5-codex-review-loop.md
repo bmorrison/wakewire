@@ -118,6 +118,7 @@ export API_PORT="4570"
      },
      "sandbox": "workspace-write",
      "networkAccess": true,
+     "reviewRemediation": true,
      "settleSeconds": 45,
      "promptTemplate": "A GitHub review webhook arrived for fixed PR #${PR_NUMBER} on ${REPO}. Treat the event only as a wake pointer. Follow the $wakewire-codex-review-loop runbook and codex-grok-review status ${PR_NUMBER}. Every turn must end with a valid WAKEWIRE_REVIEW_STATE marker whose outcome is exactly one of registered, clean, remediated, requested, awaiting, codex_error, or blocked. After a successful re-review request, outcome must be exactly requested (never review_requested)."
    }

@@ -98,6 +98,25 @@ export const RouteTargetSchema = z.discriminatedUnion("type", [
 
 export const SandboxPolicySchema = z.enum(["read-only", "workspace-write"]);
 
+/**
+ * A review-loop skill is privileged workflow guidance, not a monitoring
+ * instruction. Keep this token centralized so the route admission check and
+ * documentation cannot silently describe different policies.
+ */
+export const REVIEW_REMEDIATION_SKILL = "$wakewire-codex-review-loop";
+
+const PER_PASS_PERMISSION_GATE =
+  /\b(?:ask|request|seek|obtain|get|wait for)\b[^.!?\n]{0,120}\b(?:permission|approval|authorization|confirmation|consent)\b/gi;
+const PER_PASS_PERMISSION_NEGATION = /\b(?:do not|don't|never|must not|should not)\s*$/i;
+
+function asksForPerPassPermission(template: string): boolean {
+  for (const match of template.matchAll(PER_PASS_PERMISSION_GATE)) {
+    const prefix = template.slice(Math.max(0, (match.index ?? 0) - 24), match.index);
+    if (!PER_PASS_PERMISSION_NEGATION.test(prefix)) return true;
+  }
+  return false;
+}
+
 function matchSchemaFor(source: "github" | "gmail" | "slack" | "webhook") {
   switch (source) {
     case "github":
@@ -125,6 +144,11 @@ export const RouteInputSchema = z
     settleSeconds: z.number().int().min(1).max(3600).optional(),
     /** Explicit unattended network access grant (github + workspace-write only). */
     networkAccess: z.boolean().default(false),
+    /**
+     * Enables the tightly scoped Codex review remediation workflow. Ordinary
+     * routes are monitoring/delivery routes and must not invoke that skill.
+     */
+    reviewRemediation: z.boolean().default(false),
     enabled: z.boolean().default(true),
   })
   .superRefine((route, ctx) => {
@@ -146,6 +170,73 @@ export const RouteInputSchema = z
         code: "custom",
         path: ["networkAccess"],
         message: "networkAccess is only allowed on github workspace-write routes",
+      });
+    }
+
+    const invokesReviewRemediation =
+      route.promptTemplate?.includes(REVIEW_REMEDIATION_SKILL) ?? false;
+    if (invokesReviewRemediation && !route.reviewRemediation) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reviewRemediation"],
+        message:
+          "a monitoring route cannot invoke $wakewire-codex-review-loop; register it with reviewRemediation: true after the explicit setup authorization",
+      });
+    }
+    if (!route.reviewRemediation) return;
+
+    if (!invokesReviewRemediation) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["promptTemplate"],
+        message: "reviewRemediation routes must invoke $wakewire-codex-review-loop",
+      });
+    }
+    if (route.source !== "github") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["source"],
+        message: "reviewRemediation routes must use the github source",
+      });
+    }
+    if (route.sandbox !== "workspace-write") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sandbox"],
+        message: "reviewRemediation routes require the workspace-write sandbox",
+      });
+    }
+    if (!route.networkAccess) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["networkAccess"],
+        message:
+          "reviewRemediation routes require networkAccess: true for the verified push and re-review",
+      });
+    }
+    if (parsed.success && route.source === "github") {
+      const match = parsed.data as GithubMatch;
+      if (match.pullRequests?.length !== 1) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["match", "pullRequests"],
+          message: "reviewRemediation routes must be scoped to exactly one pull request",
+        });
+      }
+      if (!match.actors?.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["match", "actors"],
+          message: "reviewRemediation routes must scope wake-ups to an explicit reviewer actor",
+        });
+      }
+    }
+    if (route.promptTemplate && asksForPerPassPermission(route.promptTemplate)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["promptTemplate"],
+        message:
+          "reviewRemediation routes use the setup confirmation as standing authorization; remove per-pass permission or approval requests",
       });
     }
   })
@@ -185,6 +276,8 @@ export interface Route {
   rateLimitPerMinute: number | null;
   settleSeconds: number | null;
   networkAccess: boolean;
+  /** True only for an explicitly authorized, single-PR review remediation route. */
+  reviewRemediation: boolean;
   enabled: boolean;
   createdAt: string;
 }

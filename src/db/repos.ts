@@ -59,6 +59,7 @@ interface RouteRow {
   rate_limit_per_minute: number | null;
   settle_seconds: number | null;
   network_access: number;
+  review_remediation: number;
   enabled: number;
   created_at: string;
 }
@@ -101,8 +102,8 @@ export class RouteStore {
     const createdAt = nowIso();
     this.db
       .prepare(
-        `INSERT INTO routes (id, name, source_kind, match_json, target_json, prompt_template, sandbox_policy, rate_limit_per_minute, settle_seconds, network_access, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO routes (id, name, source_kind, match_json, target_json, prompt_template, sandbox_policy, rate_limit_per_minute, settle_seconds, network_access, review_remediation, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -115,6 +116,7 @@ export class RouteStore {
         input.rateLimitPerMinute ?? null,
         input.settleSeconds ?? null,
         input.networkAccess ? 1 : 0,
+        input.reviewRemediation ? 1 : 0,
         input.enabled ? 1 : 0,
         createdAt,
       );
@@ -169,6 +171,7 @@ function toRoute(row: RouteRow): Route {
     rateLimitPerMinute: row.rate_limit_per_minute ?? null,
     settleSeconds: row.settle_seconds ?? null,
     networkAccess: row.network_access === 1,
+    reviewRemediation: row.review_remediation === 1,
     enabled: row.enabled === 1,
     createdAt: row.created_at,
   };

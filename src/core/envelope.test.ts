@@ -49,6 +49,30 @@ describe("buildPrompt", () => {
     const parsed = JSON.parse(jsonText) as { message: string };
     expect(parsed.message).toContain("</event>");
   });
+
+  it("states standing authority for supervised remediation instead of asking again on each delivery", () => {
+    const prompt = buildPrompt({
+      routeName: "codex review loop",
+      event: event({ repo: "acme/api", pullRequest: 143 }),
+      instructions: "Follow $wakewire-codex-review-loop.",
+      reviewRemediation: true,
+    });
+    expect(prompt).toContain("ROUTE EXECUTION POLICY — SUPERVISED REVIEW REMEDIATION");
+    expect(prompt).toContain("standing authorization");
+    expect(prompt).toContain("reviewed passes, not individual commits");
+    expect(prompt).toContain("without requiring a state reset");
+    expect(prompt).toContain("Do not ask for redundant per-pass permission");
+  });
+
+  it("labels ordinary deliveries as monitoring-only", () => {
+    const prompt = buildPrompt({
+      routeName: "ci watch",
+      event: event({ repo: "acme/api" }),
+      instructions: "Summarize the push.",
+    });
+    expect(prompt).toContain("ROUTE EXECUTION POLICY — MONITORING ONLY");
+    expect(prompt).toContain("does not grant standing authorization for a review remediation loop");
+  });
 });
 
 describe("fenceSafeJson", () => {

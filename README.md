@@ -166,6 +166,14 @@ A route = match + target + prompt template + sandbox.
 - **Sandbox & Network** — `read-only` (default, and forced for gmail) or `workspace-write`
   (github/slack/webhook routes, opt-in). Outbound network access (`networkAccess: true`) is an
   explicit grant allowed only on GitHub `workspace-write` routes (e.g. for PR review remediation loops).
+- **Route policy** — ordinary routes are monitoring/delivery routes. A Codex
+  review remediation loop must opt into `reviewRemediation: true`; WakeWire
+  then requires GitHub, a single PR and reviewer actor, `workspace-write`, and
+  `networkAccess: true`, and adds the standing-authority policy to every turn.
+  A monitoring route cannot invoke the remediation skill. Review-round trailers
+  count reviewed passes; scoped validation/CI correction commits may reuse the
+  current round without forcing a route-state reset, while a newly evaluated
+  actionable review always advances the round.
 - **Settle Window & Rate Limiting** — `settleSeconds` defines a trailing-edge quiet window
   (e.g. 45s) where multiple incoming events (like GitHub review comments) coalesce into a single
   settle-window digest turn. Normal bursts exceeding `rateLimitPerMinute` coalesce into rate-limit digests.

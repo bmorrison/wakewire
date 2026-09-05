@@ -39,7 +39,8 @@ export async function runMcpServer(): Promise<void> {
         "(matching plain messages requires naming channels). " +
         'For generic webhook sources, match is like {"provider":"sentry","events":["issue"],"where":[{"field":"level","equals":"error"}]}. ' +
         'target.type "this-thread" targets the current conversation — the tool will tell you how to resolve the thread id if it cannot. ' +
-        "networkAccess is default-off and accepted only for github workspace-write routes.",
+        "networkAccess is default-off and accepted only for github workspace-write routes. " +
+        "Set reviewRemediation: true only for the explicitly authorized, single-PR Codex review loop; ordinary routes are monitoring-only and cannot invoke that skill.",
       inputSchema: WakewireRouteAddInputSchema,
     },
     async (args) => {
@@ -53,8 +54,9 @@ export async function runMcpServer(): Promise<void> {
       const result = await call("POST", "/api/routes", body);
       return appendNote(
         result,
-        "Sandbox note: the sandbox policy is applied to each injected turn (and to subsequent turns " +
-          "on that thread until something changes it again). Gmail routes are forced read-only.",
+        args.reviewRemediation
+          ? "Review-remediation note: this route's one-time setup confirmation is carried as standing, PR-scoped authorization on each injected wake-up. It does not authorize other routes, branches, repositories, or manual turns."
+          : "Monitoring note: this route does not grant standing authorization for $wakewire-codex-review-loop. Its sandbox policy is attached only to each injected turn; Gmail routes are forced read-only.",
       );
     },
   );

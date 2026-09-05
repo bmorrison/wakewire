@@ -50,6 +50,12 @@ export const WakewireRouteAddInputSchema = {
     .describe(
       "Explicit unattended outbound network access grant. Default false; only allowed for GitHub routes with workspace-write sandbox.",
     ),
+  reviewRemediation: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set true only for the explicitly authorized, single-PR $wakewire-codex-review-loop. It requires GitHub, workspace-write, networkAccess: true, and an explicit reviewer actor; ordinary routes are monitoring-only.",
+    ),
 };
 
 export type WakewireRouteAddArgs = z.infer<z.ZodObject<typeof WakewireRouteAddInputSchema>>;
@@ -93,6 +99,7 @@ export function buildRouteCreateBody(args: WakewireRouteAddArgs): {
   if (args.rateLimitPerMinute !== undefined) body.rateLimitPerMinute = args.rateLimitPerMinute;
   if (args.settleSeconds !== undefined) body.settleSeconds = args.settleSeconds;
   if (args.networkAccess !== undefined) body.networkAccess = args.networkAccess;
+  if (args.reviewRemediation !== undefined) body.reviewRemediation = args.reviewRemediation;
 
   return { body };
 }

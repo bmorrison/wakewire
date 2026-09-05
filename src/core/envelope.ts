@@ -13,15 +13,19 @@ export interface EnvelopeInput {
   event: WakeEvent;
   /** Already rendered from the route's (trusted) template. */
   instructions: string;
+  /** Route admission distinguishes ordinary monitoring from review remediation. */
+  reviewRemediation?: boolean;
 }
 
 export function buildPrompt(input: EnvelopeInput): string {
-  const { routeName, event, instructions } = input;
+  const { routeName, event, instructions, reviewRemediation = false } = input;
   const when = formatLocalTime(event.occurredAt);
   const payloadJson = fenceSafeJson({ summary: event.summary, ...event.payload });
 
   return [
     `[wakewire event] ${routeName} — ${event.kind} from ${event.source} at ${when}`,
+    "",
+    routePolicy(reviewRemediation),
     "",
     "INSTRUCTIONS (from the user's route config, written by the user, trusted):",
     instructions,
@@ -41,9 +45,17 @@ export function buildDigestPrompt(input: {
   source: WakeEvent["source"];
   instructions: string;
   events: WakeEvent[];
+  reviewRemediation?: boolean;
   reason?: "rate limit" | "settle window";
 }): string {
-  const { routeName, source, instructions, events, reason = "rate limit" } = input;
+  const {
+    routeName,
+    source,
+    instructions,
+    events,
+    reviewRemediation = false,
+    reason = "rate limit",
+  } = input;
   const latest = events[events.length - 1];
   // Summaries here sit inside the <event> fence as plain text — escape "</" the
   // same way fenceSafeJson does so a summary containing "</event>" cannot close
@@ -56,6 +68,8 @@ export function buildDigestPrompt(input: {
 
   return [
     `[wakewire digest] ${routeName} — ${events.length} ${source} events coalesced (${reason})`,
+    "",
+    routePolicy(reviewRemediation),
     "",
     "INSTRUCTIONS (from the user's route config, written by the user, trusted):",
     instructions,
@@ -70,6 +84,21 @@ export function buildDigestPrompt(input: {
     latestJson,
     "```",
     "</event>",
+  ].join("\n");
+}
+
+function routePolicy(reviewRemediation: boolean): string {
+  if (!reviewRemediation) {
+    return [
+      "ROUTE EXECUTION POLICY — MONITORING ONLY:",
+      "This route does not grant standing authorization for a review remediation loop. Do not invoke $wakewire-codex-review-loop to edit, commit, push, or request re-review from this delivery.",
+    ].join("\n");
+  }
+  return [
+    "ROUTE EXECUTION POLICY — SUPERVISED REVIEW REMEDIATION:",
+    "The route's one-time setup confirmation is standing authorization for the registered PR only: follow the review-loop skill's bounded edit, validate, commit, non-force-push, and re-review procedure on every wake-up.",
+    "Review rounds identify reviewed passes, not individual commits. A scoped validation or CI correction may reuse the current round trailer without requiring a state reset.",
+    "Do not ask for redundant per-pass permission. Stop instead when that skill's preflight or scope checks fail.",
   ].join("\n");
 }
 
