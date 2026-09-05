@@ -7,6 +7,25 @@ description: Event-driven remediation loop for GitHub pull request reviews from 
 
 This skill operates an unattended, event-driven remediation loop for a single GitHub pull request reviewed by OpenAI Codex Code Review (`chatgpt-codex-connector[bot]`). It executes inside an explicitly chosen Codex CLI session attached to WakeWire's shared loopback App Server, woken by signed GitHub review webhooks.
 
+## 0. Route-Policy Admission
+
+Before following any remediation step, inspect the trusted WakeWire prompt for
+its `ROUTE EXECUTION POLICY` block:
+
+- Continue only when it says `SUPERVISED REVIEW REMEDIATION`. That policy is
+  emitted only for a route registered with `reviewRemediation: true`, GitHub,
+  `workspace-write`, `networkAccess: true`, one PR, and an explicit reviewer
+  actor.
+- If it says `MONITORING ONLY`, is absent, or contradicts the route's claimed
+  remediation purpose, **do not edit, commit, push, request review, or ask for
+  permission to do so.** Report the route/skill policy mismatch and stop. The
+  route must be corrected or re-registered; do not reinterpret a monitoring
+  route from its name or event payload.
+- For an admitted remediation route, the one-time confirmation obtained at
+  route setup is standing authorization for every later wake-up within the
+  registered PR scope. Do not request redundant per-pass approval. Stop only
+  on the runbook's explicit preflight, scope, or validation failures.
+
 ## 1. Prerequisites & Tool Authority
 
 1. **`codex-grok-review` is the Sole Review-State Authority:**
@@ -47,7 +66,10 @@ WAKEWIRE_REVIEW_STATE {"version":1,"repo":"OWNER/REPO","pr":143,"baselineHead":"
 - `pr`: Positive integer PR number matching the registered route.
 - `baselineHead`: Full or 7+ char commit SHA verified at route registration.
 - `lastSeenHead`: Commit SHA evaluated by authoritative status in the current turn.
-- `remediationRounds`: Count of successfully pushed exit-2 remediation commits (0..5).
+- `remediationRounds`: Count of distinct authoritative exit-2 finding sets for
+  which remediation has been pushed (0..5). One finding set may produce more
+  than one commit when a focused follow-up is needed to make its validation or
+  CI green.
 - `consecutiveErrors`: Count of consecutive exit-5 Codex error verdicts without an intervening exit 0/2/3/4 (0..3).
 - `lastRequestedHead`: Commit SHA for which `codex-grok-review request` was successfully called (or `null`).
 - `outcome`: One of `"registered"`, `"clean"`, `"remediated"`, `"requested"`, `"awaiting"`, `"codex_error"`, or `"blocked"`.
@@ -58,14 +80,28 @@ At the start of every wake-up turn:
 2. Validate marker structure: `version === 1`, exact `repo`, exact `pr`, valid SHA strings for `baselineHead`/`lastSeenHead`/`lastRequestedHead` (or `null`), non-decreasing counters within valid state transitions, and a valid `outcome`.
 3. If no valid marker exists (e.g. after lossy context compaction) or the marker is malformed, STOP immediately. Make no edits or requests, emit `outcome: "blocked"`, and instruct the user to repair or re-register. Never silently initialize counters to zero during a webhook turn.
 4. Reconcile Git commit trailers against `remediationRounds`:
-   - Inspect commits between `baselineHead` and current local `HEAD`.
-   - Each remediation commit must contain trailers:
+   - Inspect commits between `baselineHead` and current local `HEAD` in
+     chronological order.
+   - Each remediation or same-pass validation-correction commit must contain
+     trailers:
      ```text
      WakeWire-Review-PR: OWNER/REPO#<PR>
      WakeWire-Review-Round: <N>
      ```
-   - Verify that the highest contiguous round number exactly equals `remediationRounds`.
-   - If trailers disagree with `remediationRounds`, have gaps, or have duplicate round numbers with different commit SHAs, STOP immediately and emit `outcome: "blocked"`.
+   - Treat the round as a review-pass identifier, not a unique commit ordinal.
+     The sequence must begin at `1`, may repeat the current value for scoped
+     validation/CI corrections in that same pass, and may otherwise advance by
+     exactly one. For example, `1,1,2,2,3` is valid.
+   - Trailer reconciliation establishes recoverable history; it does not grant
+     permission to label new review findings as an old round. Once
+     `codex-grok-review status` evaluates a newer actionable finding set, any
+     fix for it must use the next round even if the reviewed Git head is
+     unchanged.
+   - Verify that the highest contiguous round number exactly equals
+     `remediationRounds`. STOP if trailers are missing or mismatched, the
+     sequence decreases or skips a number, or the highest round disagrees with
+     the marker. Do not request a state reset merely because multiple commits
+     carry the same valid round.
 
 ---
 
@@ -73,7 +109,15 @@ At the start of every wake-up turn:
 
 Transitions must strictly obey the following rules:
 - `lastSeenHead`: Changes only to the commit SHA reported by `codex-grok-review status`.
-- `remediationRounds`: Increments from N to N+1 immediately upon successful `git push` of an exit-2 fix. If the subsequent `codex-grok-review request` fails, `remediationRounds` remains N+1, `lastRequestedHead` remains unadvanced, and `outcome: "blocked"` is emitted. (On the next wake-up, trailer reconciliation succeeds because the pushed commit exists in Git, allowing safe retry of the request).
+- `remediationRounds`: Increments from N to N+1 immediately upon successful
+  `git push` of the first exit-2 fix commit for a newly evaluated review pass.
+  A later commit that only corrects validation or CI for that same pass reuses
+  round N+1 and does not increment the counter. It must not include fixes first
+  identified by a later authoritative review. If the subsequent
+  `codex-grok-review request` fails, `remediationRounds` remains N+1,
+  `lastRequestedHead` remains unadvanced, and `outcome: "blocked"` is emitted.
+  (On the next wake-up, trailer reconciliation succeeds because the pushed
+  commit or commits exist in Git, allowing safe retry of the request.)
 - `lastRequestedHead`: Changes to current `HEAD` only after `codex-grok-review request` completes with exit code `0`.
 - `consecutiveErrors`: Increments only on exit code `5`. Resets to `0` on any non-error verdict (exits `0`, `2`, `3`, `4`).
 - **Failure Rule:** Any failure in preflight, status query, finding reproduction, test gate, commit, push, or request MUST terminate the turn with `outcome: "blocked"` without falsely advancing the affected counter or head fields.
@@ -132,6 +176,13 @@ Run `codex-grok-review status <PR>`. Preserve the numeric exit code:
   - Push explicitly: `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` (strictly without `--force`). Do not push to any base-repository remote or a same-named branch selected by inference.
   - If the push is rejected (e.g. non-fast-forward), STOP immediately with `outcome: "blocked"`. Never pull, rebase, reset, or force-push.
   - Upon successful push, set `remediationRounds = N + 1`.
+  - If a required validation or CI gate subsequently exposes a narrowly scoped
+    defect in this just-pushed pass, fix and validate it without resetting the
+    loop. Commit the correction with the same `WakeWire-Review-Round: <N+1>`
+    trailers and keep `remediationRounds` unchanged. This exception is only for
+    completing the already-counted finding set; findings from any newly
+    evaluated actionable Codex review start the next round, even if that review
+    targets the same Git head.
   - Post review request: run `codex-grok-review request <PR>`.
     - If `request` fails, emit `outcome: "blocked"` (retaining `remediationRounds: N+1` and unchanged `lastRequestedHead`).
     - If `request` succeeds, update `lastRequestedHead: <NEW_HEAD>` and emit `outcome: "requested"`.

@@ -127,11 +127,18 @@ enabling `workspace-write` on anything.
 
 The unattended Codex review remediation loop pairs event-driven wakeups with write and network access:
 
+- **Route Policy Admission**: A route is monitoring/delivery by default and
+  cannot invoke `$wakewire-codex-review-loop`. Remediation must be explicitly
+  opted into with `reviewRemediation: true`; registration then requires GitHub,
+  `workspace-write`, `networkAccess: true`, exactly one PR, an explicit
+  reviewer actor, and no per-pass approval gate in the template. WakeWire emits
+  the resulting policy on every injected prompt, so the skill can safe-stop if
+  a monitoring/remediation mismatch ever reaches it.
 - **Signed Ingress as a Trigger Boundary**: GitHub HMAC verification (`X-Hub-Signature-256`) and exact scoping (`pullRequests`, `actors: ["chatgpt-codex-connector[bot]"]`) ensure that only authentic review events wake the agent. However, webhook body content remains an untrusted pointer; review state is always re-fetched via the authoritative `codex-grok-review` tool.
 - **Explicit Network & Write Grant**: Outbound network access (`networkAccess: true`) is default-off, supported exclusively on the `codex-app-server` adapter, and permitted only on GitHub routes with `workspace-write`. Network access is broad egress (as supported by Codex sandboxing) rather than domain-restricted allowlisting; users must explicitly authorize this grant during setup.
 - **Authoritative Checkout Scope**: For a resumed workspace-write turn, WakeWire derives writable roots only from the App Server's `thread/resume.cwd`: exactly the checkout and its `<cwd>/.git` metadata directory. The latter is needed because Codex's managed sandbox treats Git metadata as a more-specific path; it is not permission to write a parent directory or another checkout. The live remediation topology requires a standalone clone with a physical writable `.git` directory; linked worktrees whose metadata redirects outside the checkout are unsupported.
 - **Minimal Safe Topology**: The only supported deployment topology is one dedicated, attached Codex CLI session (`codex --remote`) per active PR checkout. Running unattended review remediation loops across shared or dirty worktrees is unsupported.
-- **Hard Prohibitions**: Remediation loops operate under strict constraints: never write to default branches (e.g. `main`), never force-push, never rebase, never merge, and never delete branches or dismiss review comments. Commits are tracked with `WakeWire-Review-PR` and `WakeWire-Review-Round` trailers.
+- **Hard Prohibitions**: Remediation loops operate under strict constraints: never write to default branches (e.g. `main`), never force-push, never rebase, never merge, and never delete branches or dismiss review comments. Commits are tracked with `WakeWire-Review-PR` and `WakeWire-Review-Round` trailers. A round identifies an authoritative actionable finding set; validation or CI corrections for that same set may reuse its round, while newly evaluated actionable findings always advance it and ordered/gap-free reconciliation still detects state drift.
 
 ## Reporting
 

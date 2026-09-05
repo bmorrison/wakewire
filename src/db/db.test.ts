@@ -78,8 +78,8 @@ describe("migration 3 upgrade (source-kind CHECK removal)", () => {
   });
 });
 
-describe("migration 5 upgrade (settle_seconds and network_access)", () => {
-  it("preserves v4 routes/deliveries/sources/captures and defaults settle_seconds to null and network_access to 0", () => {
+describe("migration 5+ upgrade (settle_seconds, network_access, and review_remediation)", () => {
+  it("preserves v4 routes/deliveries/sources/captures and defaults policy fields safely", () => {
     const db = new DatabaseConstructor(":memory:");
     migrate(db, 4); // apply up to migration 4
 
@@ -109,6 +109,7 @@ describe("migration 5 upgrade (settle_seconds and network_access)", () => {
     expect(loaded?.name).toBe("v4 route");
     expect(loaded?.settleSeconds).toBeNull();
     expect(loaded?.networkAccess).toBe(false);
+    expect(loaded?.reviewRemediation).toBe(false);
     expect(loaded?.rateLimitPerMinute).toBe(10);
   });
 });
@@ -119,18 +120,31 @@ describe("stores", () => {
     const route = stores.routes.create({
       name: "r",
       source: "github",
-      match: { repo: "a/b", events: ["push"] },
+      match: {
+        repo: "a/b",
+        events: ["pull_request_review.submitted"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
       target: { type: "thread", threadId: "t-1" },
       sandbox: "workspace-write",
       settleSeconds: 45,
       networkAccess: true,
+      reviewRemediation: true,
+      promptTemplate: "Follow $wakewire-codex-review-loop.",
       enabled: true,
     });
     const loaded = stores.routes.get(route.id);
-    expect(loaded?.match).toEqual({ repo: "a/b", events: ["push"] });
+    expect(loaded?.match).toEqual({
+      repo: "a/b",
+      events: ["pull_request_review.submitted"],
+      pullRequests: [143],
+      actors: ["chatgpt-codex-connector[bot]"],
+    });
     expect(loaded?.target).toEqual({ type: "thread", threadId: "t-1" });
     expect(loaded?.settleSeconds).toBe(45);
     expect(loaded?.networkAccess).toBe(true);
+    expect(loaded?.reviewRemediation).toBe(true);
     expect(stores.routes.list()).toHaveLength(1);
     expect(stores.routes.remove(route.id)).toBe(true);
     expect(stores.routes.list()).toHaveLength(0);

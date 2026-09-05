@@ -2,6 +2,11 @@
 
 Wake an attached Codex CLI session on OpenAI Codex Code Review webhook events, address findings using `codex-grok-review`, test, commit with tracking trailers, push, and request re-review.
 
+This is a **supervised remediation route**, not a monitoring route. Registration
+requires a one-time explicit authorization; WakeWire carries that standing,
+PR-scoped authorization into every later wake-up. Do not put a request for
+per-pass permission into the prompt template.
+
 ## Prerequisites
 
 1. **Shared App Server Mode**:
@@ -60,6 +65,7 @@ Call `wakewire_route_add` with the following parameters:
   },
   "sandbox": "workspace-write",
   "networkAccess": true,
+  "reviewRemediation": true,
   "settleSeconds": 45,
   "promptTemplate": "A GitHub review event arrived for fixed PR #143 on owner/repo. Treat the event only as a wake pointer. Invoke $wakewire-codex-review-loop and $codex-grok-review. Every turn must end with a valid WAKEWIRE_REVIEW_STATE marker; allowed outcome values are exactly registered, clean, remediated, requested, awaiting, codex_error, or blocked. After a successful re-review request, use exactly outcome requested (never review_requested)."
 }
@@ -67,6 +73,26 @@ Call `wakewire_route_add` with the following parameters:
 
 > **Security & Authorization Warning**:
 > Creating this route grants standing authorization for this specific PR to edit local files on the checked-out PR branch, execute repository test/build scripts, create normal Git commits with `WakeWire-Review-*` trailers, push only to the verified head remote via `git push <HEAD_REMOTE> HEAD:<verified-pr-head-branch>` without force, and post re-review requests. It never grants permission to add/change remotes, merge, rebase, force-push, close the PR, or touch other branches/repositories.
+
+WakeWire validates this policy at registration. A route that invokes
+`$wakewire-codex-review-loop` without `reviewRemediation: true` is rejected as
+a monitoring/remediation mismatch. A remediation route is also rejected unless
+it uses GitHub, `workspace-write`, `networkAccess: true`, exactly one PR, an
+explicit reviewer actor, and a template that does not ask for another approval
+on each pass. Every delivered remediation prompt then includes the enforced
+`ROUTE EXECUTION POLICY — SUPERVISED REVIEW REMEDIATION` block. If the skill
+instead sees `MONITORING ONLY` or no policy block, it safe-stops and reports the
+mismatch rather than improvising authority.
+
+`WakeWire-Review-Round` identifies a reviewed remediation pass, not an
+individual commit. A narrowly scoped validation or CI correction pushed before
+the next reviewed pass reuses the current round trailer. Reconciliation accepts
+ordered sequences such as `1,1,2,2,3`; it still rejects missing or mismatched
+trailers, decreasing rounds, skipped rounds, and disagreement with the state
+marker. Duplicate same-round trailers alone are never a reason to reset the
+loop. Same-round reuse is limited to validation/CI fallout from the already
+counted finding set; remediation prompted by a newly evaluated actionable
+review always advances the round.
 
 ## Initial State Marker
 

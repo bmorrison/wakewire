@@ -77,6 +77,7 @@ describe("buildRouteCreateBody", () => {
       target: { type: "thread", threadId: "t-1" },
       sandbox: "workspace-write",
       networkAccess: true,
+      reviewRemediation: true,
       settleSeconds: 45,
     });
     expect(withTrue.body).toEqual({
@@ -91,6 +92,7 @@ describe("buildRouteCreateBody", () => {
       target: { type: "thread", threadId: "t-1" },
       sandbox: "workspace-write",
       networkAccess: true,
+      reviewRemediation: true,
       settleSeconds: 45,
     });
   });

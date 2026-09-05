@@ -176,7 +176,12 @@ export class DeliveryQueue {
   private renderPrompt(route: Route, event: WakeEvent): string {
     const template = route.promptTemplate ?? DEFAULT_TEMPLATES[event.source];
     const instructions = renderTemplate(template, templateFields(route.name, event));
-    return buildPrompt({ routeName: route.name, event, instructions });
+    return buildPrompt({
+      routeName: route.name,
+      event,
+      instructions,
+      reviewRemediation: route.reviewRemediation,
+    });
   }
 
   /**
@@ -237,6 +242,7 @@ export class DeliveryQueue {
       source: route.source,
       instructions,
       events,
+      reviewRemediation: route.reviewRemediation,
       reason,
     });
     this.stores.deliveries.updatePrompt(carrier.id, digest);

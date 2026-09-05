@@ -86,6 +86,96 @@ describe("RouteInputSchema", () => {
     expect(result.data?.target).toEqual({ type: "new-thread", cwd: "/repos/api", worktree: true });
   });
 
+  it("requires an explicit, fully scoped remediation policy before a route may invoke the review loop", () => {
+    const monitoringRouteWithReviewSkill = RouteInputSchema.safeParse({
+      name: "review monitor",
+      source: "github",
+      match: {
+        repo: "acme/api",
+        events: ["pull_request_review.submitted"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+      target: { type: "thread", threadId: "t-1" },
+      sandbox: "read-only",
+      promptTemplate: "Follow $wakewire-codex-review-loop.",
+    });
+    expect(monitoringRouteWithReviewSkill.success).toBe(false);
+    expect(JSON.stringify(monitoringRouteWithReviewSkill.error?.issues)).toContain(
+      "reviewRemediation",
+    );
+
+    const incompleteRemediationRoute = RouteInputSchema.safeParse({
+      name: "review loop",
+      source: "github",
+      match: { repo: "acme/api", events: ["pull_request_review.submitted"] },
+      target: { type: "thread", threadId: "t-1" },
+      reviewRemediation: true,
+      sandbox: "workspace-write",
+      networkAccess: true,
+      promptTemplate: "Follow $wakewire-codex-review-loop.",
+    });
+    expect(incompleteRemediationRoute.success).toBe(false);
+    expect(JSON.stringify(incompleteRemediationRoute.error?.issues)).toContain("pullRequests");
+
+    const remediationRoute = RouteInputSchema.parse({
+      name: "review loop",
+      source: "github",
+      match: {
+        repo: "acme/api",
+        events: ["pull_request_review.submitted"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+      target: { type: "thread", threadId: "t-1" },
+      reviewRemediation: true,
+      sandbox: "workspace-write",
+      networkAccess: true,
+      promptTemplate: "Follow $wakewire-codex-review-loop.",
+    });
+    expect(remediationRoute.reviewRemediation).toBe(true);
+  });
+
+  it("rejects a remediation template that asks for permission again on each wake-up", () => {
+    const result = RouteInputSchema.safeParse({
+      name: "review loop",
+      source: "github",
+      match: {
+        repo: "acme/api",
+        events: ["pull_request_review.submitted"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+      target: { type: "thread", threadId: "t-1" },
+      reviewRemediation: true,
+      sandbox: "workspace-write",
+      networkAccess: true,
+      promptTemplate:
+        "Follow $wakewire-codex-review-loop. Ask the user for permission before each fix.",
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain("per-pass permission");
+  });
+
+  it("accepts a remediation template that explicitly forbids redundant permission prompts", () => {
+    const result = RouteInputSchema.safeParse({
+      name: "review loop",
+      source: "github",
+      match: {
+        repo: "acme/api",
+        events: ["pull_request_review.submitted"],
+        pullRequests: [143],
+        actors: ["chatgpt-codex-connector[bot]"],
+      },
+      target: { type: "thread", threadId: "t-1" },
+      reviewRemediation: true,
+      sandbox: "workspace-write",
+      networkAccess: true,
+      promptTemplate: "Follow $wakewire-codex-review-loop. Do not ask for permission on each pass.",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("slack: message routes require channels; mention-only routes do not", () => {
     const mentionOnly = RouteInputSchema.safeParse({
       name: "mentions",

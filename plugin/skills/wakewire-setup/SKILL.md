@@ -114,6 +114,11 @@ Known-provider presets (ClickUp, Linear, Sentry) are in the package's recipes/ d
 
 ### Codex Code Review Remediation Loop
 For automated, event-driven remediation of GitHub PR reviews from Codex:
+0. **Choose the route policy deliberately:** Ordinary WakeWire routes are
+   monitoring/delivery routes. They cannot invoke `$wakewire-codex-review-loop`.
+   A remediation route is a separate, supervised policy that emits standing
+   authorization on each injected turn; it is not a monitoring route with a
+   more forceful prompt.
 1. Check `wakewire_status`. Verify `adapter.networkEnabledRoutesSupported === true` and `adapter.sharedServerConfigured === true`. If not, have the user configure `sink.appServerListen` (e.g. `ws://127.0.0.1:4571`) and restart WakeWire. Note: A configured listener alone indicates server capability, not that a live TUI is currently connected.
 2. Explain that the current setup chat may remain visibly idle during later
    rounds. Ask the user to confirm that the **exact target thread** is currently
@@ -130,7 +135,11 @@ For automated, event-driven remediation of GitHub PR reviews from Codex:
    - `actors`: `["chatgpt-codex-connector[bot]"]`
    - `sandbox`: `"workspace-write"`
    - `networkAccess`: `true`
+   - `reviewRemediation`: `true`
    - `settleSeconds`: `45`
+   - Keep the template focused on waking the review-loop skill. Never ask for
+     permission or approval on each pass: WakeWire rejects that contradiction,
+     and its generated route-policy block carries the one-time standing grant.
 8. Finish setup by emitting the initialized `WAKEWIRE_REVIEW_STATE` marker with `baselineHead` and `lastSeenHead` set to current HEAD.
 9. Finish with the visibility status required above. Name the target thread and
    explicitly warn that other chats will not show new rounds automatically.
@@ -190,8 +199,9 @@ To set up an autonomous review remediation loop for a specific PR:
    - `target`: `{ "type": "thread", "threadId": "<CODEX_THREAD_ID>" }`
    - `sandbox`: `"workspace-write"`
    - `networkAccess`: `true`
+   - `reviewRemediation`: `true`
    - `settleSeconds`: `45`
-   - `promptTemplate`: instructions referencing `$wakewire-codex-review-loop` and `$codex-grok-review`.
+   - `promptTemplate`: instructions referencing `$wakewire-codex-review-loop` and `$codex-grok-review`, without a per-pass permission request. WakeWire supplies the authoritative standing-authorization policy block on delivery.
 6. **Emit Initial State Marker**:
    Emit the initialized state marker with the verified HEAD commit:
    ```text

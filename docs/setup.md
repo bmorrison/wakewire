@@ -264,8 +264,13 @@ The resulting route uses:
 - **`settleSeconds`:** `45` (trailing-edge quiet window coalescing multi-comment reviews into one settle-window digest turn)
 - **`sandbox`:** `"workspace-write"`
 - **`networkAccess`:** `true` (explicit unattended network access grant)
+- **`reviewRemediation`:** `true` (selects supervised remediation rather than a monitoring-only delivery route; WakeWire then carries the one-time, PR-scoped authorization on each wake-up)
 
-See [recipes/codex-review-loop.md](../recipes/codex-review-loop.md) for the full recipe and state machine.
+The route template must invoke `$wakewire-codex-review-loop` but must not ask
+for permission again on each pass. A review-loop skill on a monitoring route is
+rejected, and the delivered remediation prompt includes the enforced route
+policy. See [recipes/codex-review-loop.md](../recipes/codex-review-loop.md) for
+the full recipe and state machine.
 
 ---
 

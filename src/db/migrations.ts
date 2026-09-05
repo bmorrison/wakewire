@@ -139,6 +139,15 @@ const MIGRATIONS: ReadonlyArray<{
       ALTER TABLE routes ADD COLUMN network_access INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // Existing routes retain their previous generic behavior. New review-loop
+    // routes must opt in explicitly through RouteInputSchema.
+    version: 6,
+    name: "route-review-remediation-policy",
+    sql: `
+      ALTER TABLE routes ADD COLUMN review_remediation INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /** targetVersion is for tests that need to exercise upgrade paths from older schemas. */
